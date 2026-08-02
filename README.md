@@ -8,15 +8,26 @@ nebo počítači živě (v reálném čase přes websockety).
 - `server.js` – Node.js server (Express + Socket.io), drží stav zápasu a rozesílá změny všem připojeným.
 - `matchLogic.js` – čistá logika tenisového skóre (0-15-30-40, shoda/výhoda, sety, tiebreak při 6:6).
 - `public/index.html` – úvodní stránka s odkazy.
-- `public/scorer.html` – ovládací panel pro zadávání bodů.
+- `public/scorer.html` – ovládací panel pro zadávání bodů (včetně výběru, jak byl bod vyhrán).
 - `public/viewer.html` – stránka pro diváky, jen ke čtení, aktualizuje se sama.
+- `public/stats.html` – statistiky zápasu (délka, winnery, esa, chyby) + stažení CSV/TXT.
 - `test-logic.js`, `test-live.js` – automatické testy (logika skóre + reálná websocket synchronizace).
 
 Podporováno: 0-15-30-40, shoda a výhoda, tiebreak při 6:6 (do 7, rozdíl 2), zápas na 2 nebo 3
-vítězné sety, undo posledního bodu, reset zápasu, vlastní jména hráčů.
+vítězné sety, volitelný supertiebreak do 10 místo rozhodující (poslední) sady, undo posledního
+bodu, reset zápasu, vlastní jména hráčů.
+
+U každého bodu si scorer může (nepovinně) vybrat, jak byl vyhrán: Winner, Eso, Vynucená chyba
+soupeře, Nevynucená chyba soupeře, Dvojchyba soupeře, nebo bez upřesnění. Eso jde vybrat jen když
+daný hráč zrovna podává, Dvojchyba soupeře jen když podává ten druhý – aplikace nabídne jen
+možnosti, které v dané situaci dávají smysl. Ze zaznamenaných bodů se pak na stránce statistik
+počítá délka zápasu a součty za oba hráče, s možností stáhnout podrobný log bodů (CSV) nebo textové
+shrnutí (TXT).
 
 Záměrně **není** řešeno: více zápasů najednou (na to jste se ptali, že to teď nepotřebujete),
-historie uložená mezi restarty serveru (stav žije jen v paměti běžícího serveru), přihlašování uživatelů.
+historie uložená mezi restarty serveru (stav i statistiky žijí jen v paměti běžícího serveru,
+při restartu serveru na Renderu např. po delší neaktivitě se ztratí), přihlašování uživatelů.
+Pokud budete chtít statistiky uchovat trvale, stáhněte si je (CSV/TXT) hned po skončení zápasu.
 
 ## Vyzkoušení na vlastním počítači
 
@@ -51,6 +62,13 @@ načte. Pro rekreační sledování zápasu je to v pořádku, jen o tom vězte 
    `https://vas-nazev.onrender.com`.
 6. Až se nasazení dokončí, pošlete divákům odkaz `https://vas-nazev.onrender.com/viewer.html`
    a sami použijte `https://vas-nazev.onrender.com/scorer.html`.
+
+### Aktualizace už nasazené aplikace
+
+Pokud už máte repozitář na GitHubu propojený s Renderem, stačí v repozitáři nahradit změněné
+soubory (nejjednodušeji přes GitHub web: otevřete soubor → tužka "Edit" → vložte nový obsah →
+Commit; nebo smažte starý a nahrajte nový přes "Add file → Upload files"). Jakmile commit proběhne
+na sledované větvi (obvykle `main`), Render automaticky spustí nový deploy během minuty.
 
 ### Poznámka k více zápasům
 

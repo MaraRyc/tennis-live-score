@@ -32,9 +32,22 @@
     <div class="status-line" id="statusLine"></div>
     <div class="winner-banner" id="winnerBanner" style="display:none"></div>
 
-    <div class="controls">
+    <div class="controls" id="pointButtons">
       <button class="btn-point" id="btnA">Bod pro A</button>
       <button class="btn-point" id="btnB">Bod pro B</button>
+    </div>
+
+    <div class="reason-panel" id="reasonPanel" style="display:none">
+      <div class="reason-title" id="reasonTitle">Bod pro …</div>
+      <div class="reason-grid">
+        <button class="btn-reason" data-reason="winner">Winner</button>
+        <button class="btn-reason" data-reason="ace" id="reasonAce">Eso</button>
+        <button class="btn-reason" data-reason="forced_error">Vynucená chyba soupeře</button>
+        <button class="btn-reason" data-reason="unforced_error">Nevynucená chyba soupeře</button>
+        <button class="btn-reason" data-reason="double_fault" id="reasonDF">Dvojchyba soupeře</button>
+        <button class="btn-reason btn-reason-muted" data-reason="">Bez upřesnění</button>
+      </div>
+      <button class="btn-secondary" id="reasonCancel">Zrušit</button>
     </div>
 
     <div class="row-secondary">
@@ -58,9 +71,15 @@
         <option value="2">Na 2 vítězné sety (best of 3)</option>
         <option value="3">Na 3 vítězné sety (best of 5)</option>
       </select>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="checkboxSuperTB" />
+        Rozhodující sada jako supertiebreak do 10 (místo poslední plné sady)
+      </label>
     </div>
   </div>
 
+  <div class="link-row"><a href="stats.html">Zobrazit statistiky zápasu →</a></div>
   <div class="link-row"><a href="viewer.html">Otevřít pohled diváka →</a></div>
   <div class="link-row"><a href="index.html">← zpět na úvod</a></div>
 </div>
@@ -70,6 +89,7 @@
 const socket = io();
 const badge = document.getElementById('connBadge');
 let lastState = null;
+let pendingPlayer = null;
 
 socket.on('connect', () => { badge.textContent = 'živě'; badge.classList.remove('offline'); });
 socket.on('disconnect', () => { badge.textContent = 'odpojeno'; badge.classList.add('offline'); });
@@ -86,19 +106,24 @@ function render(payload) {
   if (document.activeElement.id !== 'inputNameA') document.getElementById('inputNameA').placeholder = state.playerA;
   if (document.activeElement.id !== 'inputNameB') document.getElementById('inputNameB').placeholder = state.playerB;
   document.getElementById('selectFormat').value = String(state.setsToWin);
+  if (document.activeElement.id !== 'checkboxSuperTB') {
+    document.getElementById('checkboxSuperTB').checked = !!state.deciderSuperTiebreak;
+  }
 
   const setsRow = document.getElementById('setsRow');
   setsRow.innerHTML = '';
   state.sets.forEach((s, i) => {
     const pill = document.createElement('div');
     pill.className = 'set-pill';
-    pill.textContent = `Set ${i+1}: ${s.a}-${s.b}`;
+    pill.textContent = s.superTiebreak ? `Super TB: ${s.a}-${s.b}` : `Set ${i + 1}: ${s.a}-${s.b}`;
     setsRow.appendChild(pill);
   });
   if (!state.matchWinner) {
     const pill = document.createElement('div');
     pill.className = 'set-pill';
-    pill.textContent = `Hry: ${state.currentSet.gamesA}-${state.currentSet.gamesB}`;
+    pill.textContent = state.isSuperTiebreakSet
+      ? 'Rozhodující supertiebreak'
+      : `Hry: ${state.currentSet.gamesA}-${state.currentSet.gamesB}`;
     setsRow.appendChild(pill);
   }
 
@@ -120,13 +145,19 @@ function render(payload) {
     winnerBanner.textContent = `🏆 Vítěz zápasu: ${winnerName}`;
     btnA.disabled = true;
     btnB.disabled = true;
+    closeReasonPanel();
     return;
   }
   winnerBanner.style.display = 'none';
   btnA.disabled = false;
   btnB.disabled = false;
 
-  if (display.type === 'tiebreak') {
+  if (display.type === 'superTiebreak') {
+    gameLabel.textContent = 'SUPER TIEBREAK';
+    pointA.textContent = display.a;
+    pointB.textContent = display.b;
+    statusLine.textContent = 'Rozhodující supertiebreak do 10';
+  } else if (display.type === 'tiebreak') {
     gameLabel.textContent = 'TIEBREAK';
     pointA.textContent = display.a;
     pointB.textContent = display.b;
@@ -151,11 +182,53 @@ function render(payload) {
 
 socket.on('state', render);
 
-document.getElementById('btnA').addEventListener('click', () => socket.emit('action', { type: 'point', player: 'A' }));
-document.getElementById('btnB').addEventListener('click', () => socket.emit('action', { type: 'point', player: 'B' }));
-document.getElementById('btnUndo').addEventListener('click', () => socket.emit('action', { type: 'undo' }));
+const pointButtons = document.getElementById('pointButtons');
+const reasonPanel = document.getElementById('reasonPanel');
+const reasonTitle = document.getElementById('reasonTitle');
+
+function openReasonPanel(player) {
+  if (!lastState || lastState.matchWinner) return;
+  pendingPlayer = player;
+  const name = player === 'A' ? lastState.playerA : lastState.playerB;
+  reasonTitle.textContent = `Bod pro ${name} — jak byl vyhrán?`;
+
+  // Eso dává smysl jen když tento hráč podává; dvojchyba jen když podává soupeř.
+  const isServer = lastState.server === player;
+  document.getElementById('reasonAce').style.display = isServer ? 'block' : 'none';
+  document.getElementById('reasonDF').style.display = isServer ? 'none' : 'block';
+
+  pointButtons.style.display = 'none';
+  reasonPanel.style.display = 'block';
+}
+
+function closeReasonPanel() {
+  pendingPlayer = null;
+  reasonPanel.style.display = 'none';
+  pointButtons.style.display = 'grid';
+}
+
+document.getElementById('btnA').addEventListener('click', () => openReasonPanel('A'));
+document.getElementById('btnB').addEventListener('click', () => openReasonPanel('B'));
+document.getElementById('reasonCancel').addEventListener('click', closeReasonPanel);
+
+document.querySelectorAll('.btn-reason').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (!pendingPlayer) return;
+    const reason = btn.getAttribute('data-reason') || undefined;
+    socket.emit('action', { type: 'point', player: pendingPlayer, reason });
+    closeReasonPanel();
+  });
+});
+
+document.getElementById('btnUndo').addEventListener('click', () => {
+  closeReasonPanel();
+  socket.emit('action', { type: 'undo' });
+});
 document.getElementById('btnReset').addEventListener('click', () => {
-  if (confirm('Opravdu vynulovat celý zápas?')) socket.emit('action', { type: 'reset' });
+  if (confirm('Opravdu vynulovat celý zápas?')) {
+    closeReasonPanel();
+    socket.emit('action', { type: 'reset' });
+  }
 });
 
 let nameTimer = null;
@@ -170,9 +243,13 @@ function sendNames() {
 document.getElementById('inputNameA').addEventListener('input', sendNames);
 document.getElementById('inputNameB').addEventListener('input', sendNames);
 
-document.getElementById('selectFormat').addEventListener('change', (e) => {
-  socket.emit('action', { type: 'setFormat', setsToWin: Number(e.target.value) });
-});
+function sendFormat() {
+  const setsToWin = Number(document.getElementById('selectFormat').value);
+  const deciderSuperTiebreak = document.getElementById('checkboxSuperTB').checked;
+  socket.emit('action', { type: 'setFormat', setsToWin, deciderSuperTiebreak });
+}
+document.getElementById('selectFormat').addEventListener('change', sendFormat);
+document.getElementById('checkboxSuperTB').addEventListener('change', sendFormat);
 </script>
 </body>
 </html>

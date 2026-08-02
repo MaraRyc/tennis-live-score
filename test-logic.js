@@ -1,5 +1,5 @@
 const assert = require("assert");
-const { initialState, addPoint, gameScoreDisplay } = require("./matchLogic");
+const { initialState, addPoint, gameScoreDisplay, computeStats } = require("./matchLogic");
 
 function play(state, seq) {
   for (const p of seq) addPoint(state, p);
@@ -96,6 +96,74 @@ function play(state, seq) {
   addPoint(s, "B");
   assert.strictEqual(JSON.stringify(s), before, "stav se nesmí měnit po konci zápasu");
   console.log("Test 6 OK: body po konci zápasu se ignorují");
+}
+
+// Test 7: rozhodující sada jako supertiebreak do 10 (best of 3, deciderSuperTiebreak=true)
+{
+  const s = initialState("Petra", "Jana", 2, true);
+  const winGameFor = (state, winner) => play(state, [winner, winner, winner, winner]);
+  const winSetFor = (state, winner) => { for (let i = 0; i < 6; i++) winGameFor(state, winner); };
+
+  winSetFor(s, "A"); // set 1: A vyhrává 6:0
+  winSetFor(s, "B"); // set 2: B vyhrává 6:0 -> 1:1 na sety, matchWinner stále null
+  assert.strictEqual(s.matchWinner, null);
+  assert.strictEqual(s.sets.length, 2);
+  assert.ok(s.isSuperTiebreakSet, "po 1:1 na sety s deciderSuperTiebreak by měl běžet supertiebreak místo 3. sady");
+
+  // B vyhraje supertiebreak 10:4 (nejdřív odehrané body pro A, pak B doběhne na 10)
+  play(s, ["A","A","A","A","B","B","B","B","B","B","B","B","B","B"]);
+  assert.strictEqual(s.matchWinner, "B");
+  assert.strictEqual(s.sets.length, 3);
+  assert.deepStrictEqual(s.sets[2], { a: 4, b: 10, superTiebreak: true });
+  console.log("Test 7 OK: rozhodující supertiebreak do 10 místo 3. sady");
+}
+
+// Test 8: bez deciderSuperTiebreak se hraje normální 3. sada
+{
+  const s = initialState("Petra", "Jana", 2, false);
+  const winGameFor = (state, winner) => play(state, [winner, winner, winner, winner]);
+  const winSetFor = (state, winner) => { for (let i = 0; i < 6; i++) winGameFor(state, winner); };
+
+  winSetFor(s, "A");
+  winSetFor(s, "B");
+  assert.strictEqual(s.isSuperTiebreakSet, false, "bez deciderSuperTiebreak se nemá spouštět supertiebreak");
+  winSetFor(s, "A"); // normální 3. sada
+  assert.strictEqual(s.matchWinner, "A");
+  assert.strictEqual(s.sets.length, 3);
+  assert.deepStrictEqual(s.sets[2], { a: 6, b: 0 });
+  console.log("Test 8 OK: bez zapnuté volby se hraje plná 3. sada");
+}
+
+// Test 9: kategorizace bodů (winner/eso/chyby) a agregace statistik
+{
+  const s = initialState("Petra", "Jana", 2);
+  // server je na začátku "A"
+  addPoint(s, "A", "ace"); // eso pro A (A podává) -> mělo by se počítat
+  addPoint(s, "A", "winner");
+  addPoint(s, "B", "unforced_error"); // bod pro B kvůli nevynucené chybě A
+  addPoint(s, "B", "double_fault"); // bod pro B, protože A (podávající) udělal dvojchybu
+
+  const { stats, totalPoints } = computeStats(s);
+  assert.strictEqual(totalPoints, 4);
+  assert.strictEqual(stats.A.aces, 1);
+  assert.strictEqual(stats.A.winners, 1);
+  assert.strictEqual(stats.A.unforcedErrors, 1, "nevynucená chyba A se má počítat A jako chyba, ne bod");
+  assert.strictEqual(stats.A.doubleFaults, 1);
+  assert.strictEqual(stats.B.pointsWon, 2);
+  assert.strictEqual(stats.A.pointsWon, 2);
+  console.log("Test 9 OK: kategorizace bodů a agregace statistik");
+}
+
+// Test 10: neplatný důvod se ignoruje (uloží se jako bez upřesnění), délka zápasu se měří
+{
+  const s = initialState();
+  assert.strictEqual(s.startedAt, null);
+  addPoint(s, "A", "neexistujici_duvod");
+  assert.strictEqual(s.lastPointReason, null, "neplatný důvod by se měl uložit jako null");
+  assert.ok(s.startedAt, "startedAt by se mělo nastavit po prvním bodu");
+  const { durationMs } = computeStats(s);
+  assert.ok(durationMs >= 0, "délka zápasu by měla být měřitelná i za běhu");
+  console.log("Test 10 OK: neplatný důvod ignorován, délka zápasu se měří");
 }
 
 console.log("\nVšechny testy prošly.");

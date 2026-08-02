@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Statistiky zápasu</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="conn-badge" id="connBadge">připojování…</div>
+<div class="wrap">
+  <header class="top">
+    <h1>🎾 Statistiky zápasu</h1>
+    <p>Automaticky se aktualizuje podle živého zápasu.</p>
+  </header>
+
+  <div class="card">
+    <div class="sets-row" id="setsRow"></div>
+
+    <div class="duration-box">
+      <span>Délka zápasu</span>
+      <span class="big" id="durationLabel">–</span>
+    </div>
+
+    <table class="stats-table" id="statsTable">
+      <thead>
+        <tr>
+          <th></th>
+          <th id="colA">Hráč A</th>
+          <th id="colB">Hráč B</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Vyhrané body celkem</td><td id="pointsA">0</td><td id="pointsB">0</td></tr>
+        <tr><td>Winnery</td><td id="winnersA">0</td><td id="winnersB">0</td></tr>
+        <tr><td>Esa</td><td id="acesA">0</td><td id="acesB">0</td></tr>
+        <tr><td>Vynucené chyby soupeře</td><td id="feA">0</td><td id="feB">0</td></tr>
+        <tr><td>Nevynucené chyby soupeře</td><td id="ueA">0</td><td id="ueB">0</td></tr>
+        <tr><td>Dvojchyby soupeře</td><td id="dfA">0</td><td id="dfB">0</td></tr>
+      </tbody>
+    </table>
+
+    <p class="empty-note" id="emptyNote" style="display:none">
+      Zatím nebyl odehrán žádný bod se zaznamenaným důvodem. Statistiky se doplní, jakmile scorer
+      začne u bodů vybírat, jak byly vyhrané (winner / eso / chyba…).
+    </p>
+
+    <div class="download-row">
+      <button id="btnDownloadCsv">Stáhnout log bodů (CSV)</button>
+      <button id="btnDownloadTxt">Stáhnout shrnutí (TXT)</button>
+    </div>
+  </div>
+
+  <div class="link-row"><a href="scorer.html">Zadávání skóre →</a></div>
+  <div class="link-row"><a href="viewer.html">Živý pohled →</a></div>
+  <div class="link-row"><a href="index.html">← zpět na úvod</a></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const badge = document.getElementById('connBadge');
+let lastPayload = null;
+
+socket.on('connect', () => { badge.textContent = 'živě'; badge.classList.remove('offline'); });
+socket.on('disconnect', () => { badge.textContent = 'odpojeno'; badge.classList.add('offline'); });
+
+function render(payload) {
+  lastPayload = payload;
+  const { state, stats } = payload;
+
+  document.getElementById('colA').textContent = state.playerA;
+  document.getElementById('colB').textContent = state.playerB;
+  document.getElementById('durationLabel').textContent = stats.durationLabel || 'zápas ještě nezačal';
+
+  const setsRow = document.getElementById('setsRow');
+  setsRow.innerHTML = '';
+  state.sets.forEach((s, i) => {
+    const pill = document.createElement('div');
+    pill.className = 'set-pill';
+    pill.textContent = s.superTiebreak ? `Super TB: ${s.a}-${s.b}` : `Set ${i + 1}: ${s.a}-${s.b}`;
+    setsRow.appendChild(pill);
+  });
+  if (state.matchWinner) {
+    const pill = document.createElement('div');
+    pill.className = 'set-pill';
+    const winnerName = state.matchWinner === 'A' ? state.playerA : state.playerB;
+    pill.textContent = `Vítěz: ${winnerName}`;
+    setsRow.appendChild(pill);
+  }
+
+  const A = stats.stats.A;
+  const B = stats.stats.B;
+  document.getElementById('pointsA').textContent = A.pointsWon;
+  document.getElementById('pointsB').textContent = B.pointsWon;
+  document.getElementById('winnersA').textContent = A.winners;
+  document.getElementById('winnersB').textContent = B.winners;
+  document.getElementById('acesA').textContent = A.aces;
+  document.getElementById('acesB').textContent = B.aces;
+  document.getElementById('feA').textContent = A.forcedErrors;
+  document.getElementById('feB').textContent = B.forcedErrors;
+  document.getElementById('ueA').textContent = A.unforcedErrors;
+  document.getElementById('ueB').textContent = B.unforcedErrors;
+  document.getElementById('dfA').textContent = A.doubleFaults;
+  document.getElementById('dfB').textContent = B.doubleFaults;
+
+  const anyReasonLogged = state.pointLog.some((p) => p.reason);
+  const showNote = stats.totalPoints > 0 && !anyReasonLogged;
+  document.getElementById('emptyNote').style.display = showNote ? 'block' : 'none';
+}
+
+socket.on('state', render);
+
+function triggerDownload(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+const REASON_LABELS = {
+  winner: 'Winner',
+  ace: 'Eso',
+  forced_error: 'Vynucená chyba soupeře',
+  unforced_error: 'Nevynucená chyba soupeře',
+  double_fault: 'Dvojchyba soupeře',
+};
+
+function csvEscape(value) {
+  const s = String(value ?? '');
+  if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+document.getElementById('btnDownloadCsv').addEventListener('click', () => {
+  if (!lastPayload) return;
+  const { state } = lastPayload;
+  const rows = [['#', 'Čas', 'Set', 'Vyhrál bod', 'Podával', 'Důvod', 'Supertiebreak']];
+  state.pointLog.forEach((p, i) => {
+    rows.push([
+      i + 1,
+      new Date(p.t).toLocaleString('cs-CZ'),
+      p.setIndex + 1,
+      p.winner === 'A' ? state.playerA : state.playerB,
+      p.server === 'A' ? state.playerA : state.playerB,
+      p.reason ? REASON_LABELS[p.reason] || p.reason : '',
+      p.superTiebreak ? 'ano' : 'ne',
+    ]);
+  });
+  const csv = rows.map((r) => r.map(csvEscape).join(',')).join('\n');
+  triggerDownload('tenis-log-bodu.csv', csv, 'text/csv;charset=utf-8');
+});
+
+document.getElementById('btnDownloadTxt').addEventListener('click', () => {
+  if (!lastPayload) return;
+  const { state, stats } = lastPayload;
+  const lines = [];
+  lines.push(`Statistiky zápasu: ${state.playerA} vs ${state.playerB}`);
+  lines.push('='.repeat(40));
+  lines.push('');
+  lines.push(`Délka zápasu: ${stats.durationLabel || 'neznámá (zápas ještě neběžel)'}`);
+  lines.push(`Stav: ${state.matchWinner ? 'ukončeno, vítěz ' + (state.matchWinner === 'A' ? state.playerA : state.playerB) : 'probíhá'}`);
+  lines.push('');
+  lines.push('Sety:');
+  state.sets.forEach((s, i) => {
+    lines.push(`  ${s.superTiebreak ? 'Super tiebreak' : 'Set ' + (i + 1)}: ${s.a}-${s.b}`);
+  });
+  lines.push('');
+  lines.push('Statistika bodů:');
+  const A = stats.stats.A;
+  const B = stats.stats.B;
+  const row = (label, a, b) => lines.push(`  ${label.padEnd(28)} ${state.playerA}: ${a}   ${state.playerB}: ${b}`);
+  row('Vyhrané body celkem', A.pointsWon, B.pointsWon);
+  row('Winnery', A.winners, B.winners);
+  row('Esa', A.aces, B.aces);
+  row('Vynucené chyby soupeře', A.forcedErrors, B.forcedErrors);
+  row('Nevynucené chyby soupeře', A.unforcedErrors, B.unforcedErrors);
+  row('Dvojchyby soupeře', A.doubleFaults, B.doubleFaults);
+  lines.push('');
+  lines.push(`Celkem odehraných bodů: ${stats.totalPoints}`);
+  triggerDownload('tenis-shrnuti.txt', lines.join('\n'), 'text/plain;charset=utf-8');
+});
+</script>
+</body>
+</html>

@@ -49,7 +49,26 @@ async function main() {
     throw new Error("Undo nefungovalo správně, očekáváno 30:0, dostal jsem " + JSON.stringify(afterUndo.display));
   }
 
-  console.log("\nŽIVÝ TEST OK: scorer -> viewer synchronizace, jména i undo fungují přes websocket.");
+  // test kategorizace bodu (reason) a promítnutí do stats payloadu
+  scorer.emit("action", { type: "point", player: "A", reason: "ace" });
+  await wait(200);
+  const afterAce = viewerStates[viewerStates.length - 1];
+  if (afterAce.state.lastPointReason !== "ace") {
+    throw new Error("Důvod bodu (ace) se nepropsal do stavu");
+  }
+  if (!afterAce.stats || afterAce.stats.stats.A.aces !== 1) {
+    throw new Error("Statistika es se nespočítala správně, dostal jsem " + JSON.stringify(afterAce.stats));
+  }
+
+  // test formátu: zapnutí supertiebreaku jako rozhodující sady
+  scorer.emit("action", { type: "setFormat", setsToWin: 2, deciderSuperTiebreak: true });
+  await wait(150);
+  const afterFormat = viewerStates[viewerStates.length - 1];
+  if (afterFormat.state.deciderSuperTiebreak !== true) {
+    throw new Error("Nastavení supertiebreaku jako rozhodující sady se nepropsalo");
+  }
+
+  console.log("\nŽIVÝ TEST OK: scorer -> viewer synchronizace, jména, undo, kategorizace bodů i formát zápasu fungují přes websocket.");
   process.exit(0);
 }
 

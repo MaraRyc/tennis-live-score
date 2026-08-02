@@ -6,7 +6,7 @@ const path = require("path");
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const { initialState, addPoint, gameScoreDisplay } = require("./matchLogic");
+const { initialState, addPoint, gameScoreDisplay, computeStats } = require("./matchLogic");
 
 const app = express();
 const server = http.createServer(app);
@@ -29,7 +29,7 @@ function pushHistory() {
 }
 
 function publicPayload() {
-  return { state, display: gameScoreDisplay(state) };
+  return { state, display: gameScoreDisplay(state), stats: computeStats(state) };
 }
 
 function broadcast() {
@@ -47,7 +47,7 @@ io.on("connection", (socket) => {
       case "point": {
         if (action.player !== "A" && action.player !== "B") return;
         pushHistory();
-        addPoint(state, action.player);
+        addPoint(state, action.player, action.reason);
         break;
       }
       case "undo": {
@@ -57,7 +57,12 @@ io.on("connection", (socket) => {
       }
       case "reset": {
         pushHistory();
-        state = initialState(state.playerA, state.playerB, state.setsToWin);
+        state = initialState(
+          state.playerA,
+          state.playerB,
+          state.setsToWin,
+          state.deciderSuperTiebreak
+        );
         break;
       }
       case "setNames": {
@@ -71,10 +76,13 @@ io.on("connection", (socket) => {
         break;
       }
       case "setFormat": {
-        // 2 = best of 3, 3 = best of 5
+        // 2 = best of 3, 3 = best of 5; deciderSuperTiebreak = rozhodující sada jako supertiebreak do 10
+        pushHistory();
         if (action.setsToWin === 2 || action.setsToWin === 3) {
-          pushHistory();
           state.setsToWin = action.setsToWin;
+        }
+        if (typeof action.deciderSuperTiebreak === "boolean") {
+          state.deciderSuperTiebreak = action.deciderSuperTiebreak;
         }
         break;
       }

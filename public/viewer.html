@@ -34,9 +34,11 @@
     </div>
 
     <div class="status-line" id="statusLine"></div>
+    <div class="last-point-line" id="lastPointLine"></div>
     <div class="winner-banner" id="winnerBanner" style="display:none"></div>
   </div>
 
+  <div class="link-row"><a href="stats.html">Zobrazit statistiky zápasu →</a></div>
   <div class="link-row"><a href="index.html">← zpět</a></div>
 </div>
 
@@ -62,13 +64,15 @@ function render(payload) {
   state.sets.forEach((s, i) => {
     const pill = document.createElement('div');
     pill.className = 'set-pill';
-    pill.textContent = `Set ${i+1}: ${s.a}-${s.b}`;
+    pill.textContent = s.superTiebreak ? `Super TB: ${s.a}-${s.b}` : `Set ${i+1}: ${s.a}-${s.b}`;
     setsRow.appendChild(pill);
   });
   if (!state.matchWinner) {
     const pill = document.createElement('div');
     pill.className = 'set-pill';
-    pill.textContent = `Hry: ${state.currentSet.gamesA}-${state.currentSet.gamesB}`;
+    pill.textContent = state.isSuperTiebreakSet
+      ? 'Rozhodující supertiebreak'
+      : `Hry: ${state.currentSet.gamesA}-${state.currentSet.gamesB}`;
     setsRow.appendChild(pill);
   }
 
@@ -77,6 +81,21 @@ function render(payload) {
   const gameLabel = document.getElementById('gameLabel');
   const statusLine = document.getElementById('statusLine');
   const winnerBanner = document.getElementById('winnerBanner');
+  const lastPointLine = document.getElementById('lastPointLine');
+
+  const REASON_LABELS = {
+    winner: 'Winner',
+    ace: 'Eso',
+    forced_error: 'Vynucená chyba soupeře',
+    unforced_error: 'Nevynucená chyba soupeře',
+    double_fault: 'Dvojchyba soupeře',
+  };
+  if (state.lastPointWinner && state.lastPointReason && REASON_LABELS[state.lastPointReason]) {
+    const winnerName = state.lastPointWinner === 'A' ? state.playerA : state.playerB;
+    lastPointLine.textContent = `Poslední bod: ${REASON_LABELS[state.lastPointReason]} — ${winnerName}`;
+  } else {
+    lastPointLine.textContent = '';
+  }
 
   if (state.matchWinner) {
     pointA.textContent = '-';
@@ -90,7 +109,12 @@ function render(payload) {
   }
   winnerBanner.style.display = 'none';
 
-  if (display.type === 'tiebreak') {
+  if (display.type === 'superTiebreak') {
+    gameLabel.textContent = 'SUPER TIEBREAK';
+    pointA.textContent = display.a;
+    pointB.textContent = display.b;
+    statusLine.textContent = 'Rozhodující supertiebreak do 10';
+  } else if (display.type === 'tiebreak') {
     gameLabel.textContent = 'TIEBREAK';
     pointA.textContent = display.a;
     pointB.textContent = display.b;
