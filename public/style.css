@@ -249,6 +249,13 @@ button {
   margin-top: 4px;
 }
 
+.match-code-line {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  opacity: 0.75;
+  letter-spacing: 0.03em;
+}
+
 .last-point-line {
   text-align: center;
   font-size: 0.85rem;

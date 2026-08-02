@@ -1,7 +1,9 @@
 // server.js
-// Jednoduchý živý tenisový skórovač: Express + Socket.io
-// Jeden zápas najednou, stav drží server v paměti, klienti se synchronizují přes websockety.
+// Živý tenisový skórovač: Express + Socket.io
+// Podporuje více souběžných zápasů (podle kódu v URL ?m=KOD) a ukládá stav na disk,
+// aby restart/spánek serveru (např. na Renderu po neaktivitě) nevynuloval rozehraný zápas.
 
+const fs = require("fs");
 const path = require("path");
 const express = require("express");
 const http = require("http");
@@ -13,76 +15,128 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 const PORT = process.env.PORT || 3000;
+const DATA_DIR = path.join(__dirname, "data");
+const DEFAULT_MATCH_ID = "default";
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
 
 app.use(express.static(path.join(__dirname, "public")));
 
-let state = initialState();
-let history = []; // zásobník předchozích stavů pro Undo (max 50)
+// V paměti: matchId -> { state, history }. Historie (pro Undo) se na disk neukládá,
+// je jen pro běžící proces – po restartu serveru se Undo prostě "zapomene", ale
+// samotné skóre zápasu zůstává zachované.
+const matches = new Map();
+
+function sanitizeMatchId(raw) {
+  if (typeof raw !== "string") return DEFAULT_MATCH_ID;
+  const cleaned = raw.trim().slice(0, 32).replace(/[^A-Za-z0-9_-]/g, "");
+  return cleaned || DEFAULT_MATCH_ID;
+}
+
+function matchFilePath(matchId) {
+  return path.join(DATA_DIR, `${matchId}.json`);
+}
 
 function cloneState(s) {
   return JSON.parse(JSON.stringify(s));
 }
 
-function pushHistory() {
-  history.push(cloneState(state));
-  if (history.length > 50) history.shift();
+function loadStateFromDisk(matchId) {
+  try {
+    const raw = fs.readFileSync(matchFilePath(matchId), "utf8");
+    const parsed = JSON.parse(raw);
+    // Základní kontrola, že soubor obsahuje rozumný stav zápasu.
+    if (parsed && typeof parsed === "object" && parsed.playerA && parsed.playerB) {
+      return parsed;
+    }
+  } catch (err) {
+    // Soubor neexistuje nebo je poškozený – začneme s čistým zápasem.
+  }
+  return null;
 }
 
-function publicPayload() {
-  return { state, display: gameScoreDisplay(state), stats: computeStats(state) };
+function saveStateToDisk(matchId, state) {
+  try {
+    fs.writeFileSync(matchFilePath(matchId), JSON.stringify(state));
+  } catch (err) {
+    console.error(`Nepodařilo se uložit zápas ${matchId} na disk:`, err.message);
+  }
 }
 
-function broadcast() {
-  io.emit("state", publicPayload());
+function getOrCreateMatch(matchId) {
+  if (matches.has(matchId)) return matches.get(matchId);
+
+  const loaded = loadStateFromDisk(matchId);
+  const match = { state: loaded || initialState(), history: [] };
+  matches.set(matchId, match);
+  return match;
+}
+
+function payloadFor(match) {
+  return {
+    state: match.state,
+    display: gameScoreDisplay(match.state),
+    stats: computeStats(match.state),
+  };
+}
+
+function pushHistory(match) {
+  match.history.push(cloneState(match.state));
+  if (match.history.length > 50) match.history.shift();
 }
 
 io.on("connection", (socket) => {
-  // Nově připojený klient (scorer i divák) dostane aktuální stav ihned.
-  socket.emit("state", publicPayload());
+  const matchId = sanitizeMatchId(socket.handshake.query.matchId);
+  socket.data.matchId = matchId;
+  socket.join(matchId);
+
+  const match = getOrCreateMatch(matchId);
+  socket.emit("state", payloadFor(match));
 
   socket.on("action", (action) => {
     if (!action || typeof action.type !== "string") return;
+    const match = getOrCreateMatch(matchId);
 
     switch (action.type) {
       case "point": {
         if (action.player !== "A" && action.player !== "B") return;
-        pushHistory();
-        addPoint(state, action.player, action.reason);
+        pushHistory(match);
+        addPoint(match.state, action.player, action.reason);
         break;
       }
       case "undo": {
-        const prev = history.pop();
-        if (prev) state = prev;
+        const prev = match.history.pop();
+        if (prev) match.state = prev;
         break;
       }
       case "reset": {
-        pushHistory();
-        state = initialState(
-          state.playerA,
-          state.playerB,
-          state.setsToWin,
-          state.deciderSuperTiebreak
+        pushHistory(match);
+        match.state = initialState(
+          match.state.playerA,
+          match.state.playerB,
+          match.state.setsToWin,
+          match.state.deciderSuperTiebreak
         );
         break;
       }
       case "setNames": {
-        pushHistory();
+        pushHistory(match);
         if (typeof action.playerA === "string" && action.playerA.trim()) {
-          state.playerA = action.playerA.trim().slice(0, 40);
+          match.state.playerA = action.playerA.trim().slice(0, 40);
         }
         if (typeof action.playerB === "string" && action.playerB.trim()) {
-          state.playerB = action.playerB.trim().slice(0, 40);
+          match.state.playerB = action.playerB.trim().slice(0, 40);
         }
         break;
       }
       case "setFormat": {
         // 2 = best of 3, 3 = best of 5; deciderSuperTiebreak = rozhodující sada jako supertiebreak do 10
-        pushHistory();
+        pushHistory(match);
         if (action.setsToWin === 2 || action.setsToWin === 3) {
-          state.setsToWin = action.setsToWin;
+          match.state.setsToWin = action.setsToWin;
         }
         if (typeof action.deciderSuperTiebreak === "boolean") {
-          state.deciderSuperTiebreak = action.deciderSuperTiebreak;
+          match.state.deciderSuperTiebreak = action.deciderSuperTiebreak;
         }
         break;
       }
@@ -90,7 +144,8 @@ io.on("connection", (socket) => {
         return;
     }
 
-    broadcast();
+    saveStateToDisk(matchId, match.state);
+    io.to(matchId).emit("state", payloadFor(match));
   });
 });
 

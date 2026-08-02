@@ -166,4 +166,25 @@ function play(state, seq) {
   console.log("Test 10 OK: neplatný důvod ignorován, délka zápasu se měří");
 }
 
+// Test 11: střídání podání v tiebreaku (po 1. bodu, pak po každých 2 bodech)
+{
+  const s = initialState();
+  const winGameFor = (state, winner) => play(state, [winner, winner, winner, winner]);
+  for (let i = 0; i < 6; i++) { winGameFor(s, "A"); winGameFor(s, "B"); }
+  assert.ok(s.tiebreak, "tiebreak by měl běžet po 6:6");
+
+  const serverAtStart = s.server; // kdo podává 1. bod tiebreaku
+  addPoint(s, "A"); // bod 1 -> po něm se podání střídá
+  const serverAfter1 = s.server;
+  assert.notStrictEqual(serverAfter1, serverAtStart, "po 1. bodu tiebreaku se má podání střídat");
+
+  addPoint(s, "A"); // bod 2 -> podání zůstává
+  assert.strictEqual(s.server, serverAfter1, "po 2. bodu se podání ještě nemění");
+
+  addPoint(s, "A"); // bod 3 -> podání se střídá
+  assert.notStrictEqual(s.server, serverAfter1, "po 3. bodu (lichém) se má podání střídat");
+
+  console.log("Test 11 OK: střídání podání v tiebreaku (1, pak po dvou)");
+}
+
 console.log("\nVšechny testy prošly.");

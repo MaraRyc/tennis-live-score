@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Statistiky zápasu</title>
 <link rel="stylesheet" href="style.css" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f7a3d" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Tenis live" />
+<link rel="apple-touch-icon" href="icon.svg" />
 </head>
 <body>
 <div class="conn-badge" id="connBadge">připojování…</div>
@@ -12,6 +17,7 @@
   <header class="top">
     <h1>🎾 Statistiky zápasu</h1>
     <p>Automaticky se aktualizuje podle živého zápasu.</p>
+    <p class="match-code-line" id="matchCodeLine"></p>
   </header>
 
   <div class="card">
@@ -46,19 +52,29 @@
     </p>
 
     <div class="download-row">
+      <button id="btnShare">📤 Sdílet výsledek</button>
+    </div>
+    <div class="download-row">
       <button id="btnDownloadCsv">Stáhnout log bodů (CSV)</button>
       <button id="btnDownloadTxt">Stáhnout shrnutí (TXT)</button>
     </div>
   </div>
 
-  <div class="link-row"><a href="scorer.html">Zadávání skóre →</a></div>
-  <div class="link-row"><a href="viewer.html">Živý pohled →</a></div>
+  <div class="link-row"><a href="scorer.html" data-match-link="scorer.html">Zadávání skóre →</a></div>
+  <div class="link-row"><a href="viewer.html" data-match-link="viewer.html">Živý pohled →</a></div>
   <div class="link-row"><a href="index.html">← zpět na úvod</a></div>
 </div>
 
+<script src="match-id.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const socket = io();
+applyMatchLinks();
+const matchId = getMatchId();
+document.getElementById('matchCodeLine').textContent = matchId
+  ? `Kód zápasu: ${matchId}`
+  : 'Výchozí sdílený zápas';
+
+const socket = io({ query: { matchId: matchId || '' } });
 const badge = document.getElementById('connBadge');
 let lastPayload = null;
 
@@ -158,9 +174,7 @@ document.getElementById('btnDownloadCsv').addEventListener('click', () => {
   triggerDownload('tenis-log-bodu.csv', csv, 'text/csv;charset=utf-8');
 });
 
-document.getElementById('btnDownloadTxt').addEventListener('click', () => {
-  if (!lastPayload) return;
-  const { state, stats } = lastPayload;
+function buildFullReport(state, stats) {
   const lines = [];
   lines.push(`Statistiky zápasu: ${state.playerA} vs ${state.playerB}`);
   lines.push('='.repeat(40));
@@ -185,7 +199,49 @@ document.getElementById('btnDownloadTxt').addEventListener('click', () => {
   row('Dvojchyby soupeře', A.doubleFaults, B.doubleFaults);
   lines.push('');
   lines.push(`Celkem odehraných bodů: ${stats.totalPoints}`);
-  triggerDownload('tenis-shrnuti.txt', lines.join('\n'), 'text/plain;charset=utf-8');
+  return lines.join('\n');
+}
+
+function buildShortRecap(state, stats) {
+  const setsText = state.sets
+    .map((s) => (s.superTiebreak ? `${s.a}-${s.b} (super TB)` : `${s.a}-${s.b}`))
+    .join(', ');
+  const resultLine = state.matchWinner
+    ? `Vítěz: ${state.matchWinner === 'A' ? state.playerA : state.playerB} 🏆`
+    : 'Zápas právě probíhá';
+  const durationLine = stats.durationLabel ? `Délka: ${stats.durationLabel}` : '';
+  return [
+    `🎾 ${state.playerA} vs ${state.playerB}`,
+    setsText ? `Sety: ${setsText}` : '',
+    resultLine,
+    durationLine,
+  ].filter(Boolean).join('\n');
+}
+
+document.getElementById('btnDownloadTxt').addEventListener('click', () => {
+  if (!lastPayload) return;
+  const { state, stats } = lastPayload;
+  triggerDownload('tenis-shrnuti.txt', buildFullReport(state, stats), 'text/plain;charset=utf-8');
+});
+
+document.getElementById('btnShare').addEventListener('click', async () => {
+  if (!lastPayload) return;
+  const { state, stats } = lastPayload;
+  const text = buildShortRecap(state, stats);
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Výsledek tenisového zápasu', text });
+      return;
+    } catch (e) {
+      // uživatel sdílení zrušil nebo Web Share selhalo – zkusíme schránku
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    alert('Shrnutí zkopírováno do schránky, teď ho stačí vložit třeba do WhatsApp/SMS.');
+  } catch (e) {
+    alert(text);
+  }
 });
 </script>
 </body>

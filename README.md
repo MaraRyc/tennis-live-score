@@ -1,33 +1,50 @@
 # Živé tenisové skóre
 
-Jednoduchá webová aplikace: jeden člověk zadává skóre zápasu, ostatní ho sledují na svém telefonu
-nebo počítači živě (v reálném čase přes websockety).
+Webová aplikace: jeden člověk zadává skóre zápasu, ostatní ho sledují na svém telefonu nebo
+počítači živě (v reálném čase přes websockety). Podporuje více souběžných zápasů, statistiky bodů
+a instalaci jako appku na plochu telefonu.
 
 ## Co je uvnitř
 
-- `server.js` – Node.js server (Express + Socket.io), drží stav zápasu a rozesílá změny všem připojeným.
-- `matchLogic.js` – čistá logika tenisového skóre (0-15-30-40, shoda/výhoda, sety, tiebreak při 6:6).
-- `public/index.html` – úvodní stránka s odkazy.
+- `server.js` – Node.js server (Express + Socket.io). Drží stav libovolného počtu zápasů (podle
+  kódu v URL), rozesílá změny všem připojeným a ukládá stav každého zápasu do souboru v `data/`.
+- `matchLogic.js` – čistá logika tenisového skóre (0-15-30-40, shoda/výhoda, sety, tiebreak,
+  supertiebreak, střídání podání, statistiky).
+- `public/index.html` – úvodní stránka: vytvoření nového zápasu, otevření podle kódu.
 - `public/scorer.html` – ovládací panel pro zadávání bodů (včetně výběru, jak byl bod vyhrán).
 - `public/viewer.html` – stránka pro diváky, jen ke čtení, aktualizuje se sama.
-- `public/stats.html` – statistiky zápasu (délka, winnery, esa, chyby) + stažení CSV/TXT.
+- `public/stats.html` – statistiky zápasu (délka, winnery, esa, chyby), stažení CSV/TXT, sdílení výsledku.
+- `public/match-id.js` – sdílená pomůcka pro práci s kódem zápasu v URL.
+- `public/manifest.json`, `public/icon.svg` – aby šla appka přidat na plochu telefonu (PWA).
 - `test-logic.js`, `test-live.js` – automatické testy (logika skóre + reálná websocket synchronizace).
 
-Podporováno: 0-15-30-40, shoda a výhoda, tiebreak při 6:6 (do 7, rozdíl 2), zápas na 2 nebo 3
-vítězné sety, volitelný supertiebreak do 10 místo rozhodující (poslední) sady, undo posledního
-bodu, reset zápasu, vlastní jména hráčů.
+### Pravidla skóre
+
+0-15-30-40, shoda a výhoda, tiebreak při 6:6 (do 7, rozdíl 2) se správným střídáním podání
+(po 1. bodu, pak po každých 2), zápas na 2 nebo 3 vítězné sety, volitelný supertiebreak do 10
+místo rozhodující (poslední) sady, undo posledního bodu, reset zápasu, vlastní jména hráčů.
+
+### Kategorizace bodů a statistiky
 
 U každého bodu si scorer může (nepovinně) vybrat, jak byl vyhrán: Winner, Eso, Vynucená chyba
 soupeře, Nevynucená chyba soupeře, Dvojchyba soupeře, nebo bez upřesnění. Eso jde vybrat jen když
-daný hráč zrovna podává, Dvojchyba soupeře jen když podává ten druhý – aplikace nabídne jen
-možnosti, které v dané situaci dávají smysl. Ze zaznamenaných bodů se pak na stránce statistik
-počítá délka zápasu a součty za oba hráče, s možností stáhnout podrobný log bodů (CSV) nebo textové
-shrnutí (TXT).
+daný hráč zrovna podává, Dvojchyba soupeře jen když podává ten druhý. Na stránce statistik se z
+toho počítá délka zápasu a součty za oba hráče, s možností stáhnout podrobný log bodů (CSV),
+textové shrnutí (TXT), nebo rovnou sdílet krátký výsledek (tlačítko Sdílet – použije nativní sdílení
+na mobilu, jinak zkopíruje text do schránky).
 
-Záměrně **není** řešeno: více zápasů najednou (na to jste se ptali, že to teď nepotřebujete),
-historie uložená mezi restarty serveru (stav i statistiky žijí jen v paměti běžícího serveru,
-při restartu serveru na Renderu např. po delší neaktivitě se ztratí), přihlašování uživatelů.
-Pokud budete chtít statistiky uchovat trvale, stáhněte si je (CSV/TXT) hned po skončení zápasu.
+### Více zápasů najednou
+
+Na úvodní stránce lze tlačítkem "Nový zápas" vytvořit zápas s unikátním kódem (např. `K7X9QP`).
+Odkazy `scorer.html?m=K7X9QP`, `viewer.html?m=K7X9QP`, `stats.html?m=K7X9QP` pak vedou jen na tenhle
+zápas – ostatní zápasy s jiným kódem běží nezávisle vedle sebe. Bez kódu v odkazu appka používá
+jeden výchozí sdílený zápas (staré odkazy bez `?m=` dál fungují).
+
+### Instalace na plochu telefonu (PWA)
+
+V mobilním prohlížeči lze appku přidat na plochu (Safari: Sdílet → Přidat na plochu; Chrome:
+nabídne se automaticky nebo přes nabídku ⋮ → Přidat na plochu). Na iOSu se kvůli technickému
+omezení může místo naší ikony zobrazit univerzální náhradní ikona – funkčnost appky to neovlivní.
 
 ## Vyzkoušení na vlastním počítači
 
@@ -42,16 +59,33 @@ Pak otevřete `http://localhost:3000` v prohlížeči.
 
 ## Nasazení zdarma online (Render.com)
 
-Vybral jsem Render, protože nabízí bezplatný plán bez nutnosti zadávat platební kartu. Ověřil jsem
-aktuální podmínky (srpen 2026): free plán má 750 hodin běhu měsíčně, 512 MB RAM, a **server po 15
-minutách neaktivity usne** – první požadavek po probuzení může trvat 30–60 sekund, než se stránka
-načte. Pro rekreační sledování zápasu je to v pořádku, jen o tom vězte předem.
+Vybral jsem Render, protože nabízí bezplatný plán bez nutnosti zadávat platební kartu (někdy si
+Render kartu vyžádá jako ověření identity – jde jen o dočasnou autorizaci ~1 USD, hned vrácenou,
+samotný Free plán zůstává 0 USD/měsíc).
 
-### Postup
+### ⚠️ Důležité omezení free plánu, které je potřeba znát
 
-1. Založte si zdarma účet na [render.com](https://render.com) (stačí e-mail, karta se nevyžaduje).
-2. Nahrajte tuto složku (`tennis-live-score`) do repozitáře na GitHubu (nebo GitLabu) – Render z něj bude nasazovat.
-   - Nejjednodušší cesta: na GitHubu vytvořte nový repozitář, nahrajte do něj obsah této složky.
+Free instance na Renderu má **efemérní (dočasný) souborový systém**: po 15 minutách neaktivity
+server usne, a jakmile se probudí (nebo je znovu nasazen), veškeré soubory zapsané na disk se
+ztratí – včetně toho, co jsme si teď přidali (ukládání zápasu na disk). To znamená, že perzistence
+zápasu, kterou appka nově umí, **na free Renderu reálně nezabrání ztrátě rozehraného zápasu po delší
+pauze** – pomůže jen při běžném restartu procesu (např. pádu aplikace), ne při uspání kvůli
+neaktivitě.
+
+Pro hraní s kamarády, kde zápas typicky netrvá s pauzami déle než 15 minut, to nevadí. Pokud ale
+chcete mít jistotu, že appka nikdy neusne (např. u delšího turnaje s přestávkami), máte dvě reálné
+možnosti:
+
+1. **Bezplatný "keep-alive" ping** – nastavte si na [cron-job.org](https://cron-job.org) nebo
+   [UptimeRobot](https://uptimerobot.com) pravidelný požadavek na vaši adresu (např. každých
+   10 minut). Dokud appka dostává provoz, neusne a soubory na disku zůstanou.
+2. **Placený Starter plán** (7 USD/měsíc) – běží bez uspávání a navíc podporuje opravdu trvalý
+   disk.
+
+### Postup nasazení
+
+1. Založte si zdarma účet na [render.com](https://render.com).
+2. Nahrajte tuto složku (`tennis-live-score`) do repozitáře na GitHubu – Render z něj bude nasazovat.
 3. V Renderu klikněte na **New +** → **Web Service** a propojte daný repozitář.
 4. Nastavte:
    - **Environment**: Node
@@ -65,19 +99,15 @@ načte. Pro rekreační sledování zápasu je to v pořádku, jen o tom vězte 
 
 ### Aktualizace už nasazené aplikace
 
-Pokud už máte repozitář na GitHubu propojený s Renderem, stačí v repozitáři nahradit změněné
-soubory (nejjednodušeji přes GitHub web: otevřete soubor → tužka "Edit" → vložte nový obsah →
-Commit; nebo smažte starý a nahrajte nový přes "Add file → Upload files"). Jakmile commit proběhne
-na sledované větvi (obvykle `main`), Render automaticky spustí nový deploy během minuty.
-
-### Poznámka k více zápasům
-
-Aktuální verze drží jeden sdílený zápas pro všechny připojené. Pokud byste později chtěli více
-souběžných zápasů (např. turnaj s více kurty), dá se to rozšířit – dejte vědět.
+Nahraďte v GitHub repozitáři změněné soubory (přes "Add file → Upload files" – přepíše stejnojmenné
+soubory) a potvrďte commit. Render u free plánu nový commit sám automaticky nenasadí vždy hned –
+pokud se do minuty nic nezačne dít, jděte do Render dashboardu na service → **Manual Deploy** →
+**Deploy latest commit**.
 
 ## Jak to funguje technicky
 
-Prohlížeč diváka i toho, kdo zadává skóre, se připojí na server přes websocket (Socket.io).
-Když scorer klikne na "Bod pro A/B", pošle se na server zpráva, server přepočítá skóre podle
-tenisových pravidel a výsledek rozešle úplně všem připojeným prohlížečům najednou – proto je
-skóre "živé" bez nutnosti obnovovat stránku.
+Prohlížeč diváka i toho, kdo zadává skóre, se připojí na server přes websocket (Socket.io), podle
+kódu zápasu v URL se zařadí do odpovídající "místnosti". Když scorer klikne na bod, pošle se na
+server zpráva, server přepočítá skóre podle tenisových pravidel, uloží stav zápasu do souboru a
+výsledek rozešle všem připojeným v dané místnosti najednou – proto je skóre "živé" bez nutnosti
+obnovovat stránku.

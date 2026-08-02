@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Zadávání skóre</title>
 <link rel="stylesheet" href="style.css" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f7a3d" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Tenis live" />
+<link rel="apple-touch-icon" href="icon.svg" />
 </head>
 <body>
 <div class="conn-badge" id="connBadge">připojování…</div>
@@ -12,6 +17,7 @@
   <header class="top">
     <h1>🎾 Zadávání skóre</h1>
     <p>Klepnutím na tlačítko přidáte bod hráči.</p>
+    <p class="match-code-line" id="matchCodeLine"></p>
   </header>
 
   <div class="card">
@@ -76,20 +82,50 @@
         <input type="checkbox" id="checkboxSuperTB" />
         Rozhodující sada jako supertiebreak do 10 (místo poslední plné sady)
       </label>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="checkboxSound" checked />
+        Zvuk a vibrace při zadání bodu
+      </label>
     </div>
   </div>
 
-  <div class="link-row"><a href="stats.html">Zobrazit statistiky zápasu →</a></div>
-  <div class="link-row"><a href="viewer.html">Otevřít pohled diváka →</a></div>
+  <div class="link-row"><a href="stats.html" data-match-link="stats.html">Zobrazit statistiky zápasu →</a></div>
+  <div class="link-row"><a href="viewer.html" data-match-link="viewer.html">Otevřít pohled diváka →</a></div>
   <div class="link-row"><a href="index.html">← zpět na úvod</a></div>
 </div>
 
+<script src="match-id.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const socket = io();
+applyMatchLinks();
+const matchId = getMatchId();
+document.getElementById('matchCodeLine').textContent = matchId
+  ? `Kód zápasu: ${matchId}`
+  : 'Výchozí sdílený zápas (bez kódu)';
+
+const socket = io({ query: { matchId: matchId || '' } });
 const badge = document.getElementById('connBadge');
 let lastState = null;
 let pendingPlayer = null;
+
+let audioCtx = null;
+function playPointFeedback() {
+  if (!document.getElementById('checkboxSound').checked) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.15);
+  } catch (e) { /* Web Audio nemusí být dostupné, ignorujeme */ }
+  if (navigator.vibrate) navigator.vibrate(30);
+}
 
 socket.on('connect', () => { badge.textContent = 'živě'; badge.classList.remove('offline'); });
 socket.on('disconnect', () => { badge.textContent = 'odpojeno'; badge.classList.add('offline'); });
@@ -216,6 +252,7 @@ document.querySelectorAll('.btn-reason').forEach((btn) => {
     if (!pendingPlayer) return;
     const reason = btn.getAttribute('data-reason') || undefined;
     socket.emit('action', { type: 'point', player: pendingPlayer, reason });
+    playPointFeedback();
     closeReasonPanel();
   });
 });

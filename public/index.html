@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Živé tenisové skóre</title>
 <link rel="stylesheet" href="style.css" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f7a3d" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Tenis live" />
+<link rel="apple-touch-icon" href="icon.svg" />
 </head>
 <body>
 <div class="wrap">
@@ -13,25 +18,111 @@
     <p>Jeden zadává skóre, ostatní ho sledují v reálném čase.</p>
   </header>
 
-  <div class="home-links">
-    <a class="big-link" href="scorer.html">
-      Zadávat skóre
-      <span>Pro toho, kdo zápas odpískává / zapisuje body</span>
-    </a>
-    <a class="big-link" href="viewer.html">
-      Sledovat živě
-      <span>Pro diváky – jen ke čtení, automaticky se aktualizuje</span>
-    </a>
-    <a class="big-link" href="stats.html">
-      Statistiky zápasu
-      <span>Délka zápasu, winnery, esa, chyby – i ke stažení</span>
-    </a>
+  <div class="card">
+    <label>Vytvořit nový zápas</label>
+    <button id="btnCreateMatch" style="width:100%; background:var(--court); color:white; padding:16px; margin-top:6px;">
+      + Nový zápas
+    </button>
+    <p style="font-size:0.82rem; color:var(--muted); margin-top:8px;">
+      Vytvoří zápasu unikátní kód. Odkazy s tímto kódem pak stačí poslat kamarádům.
+    </p>
+
+    <div class="settings" style="margin-top:20px;">
+      <label>Nebo otevřít existující zápas podle kódu</label>
+      <div class="settings-row">
+        <input type="text" id="inputMatchCode" placeholder="např. K7X9QP" maxlength="32" style="text-transform:uppercase;" />
+      </div>
+      <div class="row-secondary" style="margin-top:4px;">
+        <button class="btn-secondary" id="btnOpenScorer">Otevřít jako scorer</button>
+        <button class="btn-secondary" id="btnOpenViewer">Otevřít jako divák</button>
+      </div>
+    </div>
   </div>
 
-  <div class="card" style="margin-top:28px; font-size:0.9rem; color:#5b6b60;">
-    Tato stránka běží pro všechny jako jeden sdílený zápas. Odkaz na „Sledovat živě“ pošlete komukoliv,
-    kdo chce mít výsledek na svém telefonu nebo počítači.
+  <div class="home-links" id="recentLinks" style="display:none">
+    <div class="card" style="padding:14px 16px;">
+      <label>Naposledy použité zápasy (jen ve vašem prohlížeči)</label>
+      <div id="recentList" style="margin-top:8px;"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:20px; font-size:0.85rem; color:var(--muted);">
+    Bez zadaného kódu appka používá jeden výchozí sdílený zápas (staré odkazy bez kódu dál fungují).
+    <div class="link-row" style="margin-top:10px;"><a href="scorer.html">Zadávat skóre (výchozí zápas) →</a></div>
+    <div class="link-row"><a href="viewer.html">Sledovat živě (výchozí zápas) →</a></div>
+    <div class="link-row"><a href="stats.html">Statistiky (výchozí zápas) →</a></div>
   </div>
 </div>
+
+<script src="match-id.js"></script>
+<script>
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // bez matoucích znaků (0/O, 1/I)
+
+function generateMatchCode(length = 6) {
+  let code = '';
+  for (let i = 0; i < length; i++) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+function rememberMatch(code) {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem('tennisRecentMatches') || '[]'); } catch (e) {}
+  list = [code, ...list.filter((c) => c !== code)].slice(0, 8);
+  localStorage.setItem('tennisRecentMatches', JSON.stringify(list));
+}
+
+function renderRecent() {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem('tennisRecentMatches') || '[]'); } catch (e) {}
+  if (!list.length) return;
+  document.getElementById('recentLinks').style.display = 'block';
+  const container = document.getElementById('recentList');
+  container.innerHTML = '';
+  list.forEach((code) => {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.justifyContent = 'space-between';
+    row.style.alignItems = 'center';
+    row.style.padding = '6px 0';
+    row.innerHTML = `<strong>${code}</strong>`;
+    const links = document.createElement('div');
+    const scorerLink = document.createElement('a');
+    scorerLink.href = `scorer.html?m=${encodeURIComponent(code)}`;
+    scorerLink.textContent = 'scorer';
+    scorerLink.style.marginRight = '12px';
+    const viewerLink = document.createElement('a');
+    viewerLink.href = `viewer.html?m=${encodeURIComponent(code)}`;
+    viewerLink.textContent = 'divák';
+    links.appendChild(scorerLink);
+    links.appendChild(viewerLink);
+    row.appendChild(links);
+    container.appendChild(row);
+  });
+}
+
+document.getElementById('btnCreateMatch').addEventListener('click', () => {
+  const code = generateMatchCode();
+  rememberMatch(code);
+  window.location.href = `scorer.html?m=${encodeURIComponent(code)}`;
+});
+
+document.getElementById('btnOpenScorer').addEventListener('click', () => {
+  const code = document.getElementById('inputMatchCode').value.trim().toUpperCase();
+  if (!code) return;
+  rememberMatch(code);
+  window.location.href = `scorer.html?m=${encodeURIComponent(code)}`;
+});
+
+document.getElementById('btnOpenViewer').addEventListener('click', () => {
+  const code = document.getElementById('inputMatchCode').value.trim().toUpperCase();
+  if (!code) return;
+  rememberMatch(code);
+  window.location.href = `viewer.html?m=${encodeURIComponent(code)}`;
+});
+
+renderRecent();
+</script>
 </body>
 </html>

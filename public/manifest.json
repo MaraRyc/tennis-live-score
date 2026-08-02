@@ -1,0 +1,12 @@
+{
+  "name": "Živé tenisové skóre",
+  "short_name": "Tenis live",
+  "description": "Zadávání a živé sledování tenisového skóre mezi kamarády.",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#2f7a3d",
+  "theme_color": "#2f7a3d",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

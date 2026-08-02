@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Živé skóre – sledování</title>
 <link rel="stylesheet" href="style.css" />
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#2f7a3d" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Tenis live" />
+<link rel="apple-touch-icon" href="icon.svg" />
 </head>
 <body>
 <div class="conn-badge" id="connBadge">připojování…</div>
@@ -12,6 +17,7 @@
   <header class="top">
     <h1>🎾 Živé skóre</h1>
     <p id="formatLabel">Sledování v reálném čase</p>
+    <p class="match-code-line" id="matchCodeLine"></p>
   </header>
 
   <div class="card">
@@ -38,13 +44,20 @@
     <div class="winner-banner" id="winnerBanner" style="display:none"></div>
   </div>
 
-  <div class="link-row"><a href="stats.html">Zobrazit statistiky zápasu →</a></div>
+  <div class="link-row"><a href="stats.html" data-match-link="stats.html">Zobrazit statistiky zápasu →</a></div>
   <div class="link-row"><a href="index.html">← zpět</a></div>
 </div>
 
+<script src="match-id.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const socket = io();
+applyMatchLinks();
+const matchId = getMatchId();
+document.getElementById('matchCodeLine').textContent = matchId
+  ? `Kód zápasu: ${matchId}`
+  : 'Výchozí sdílený zápas';
+
+const socket = io({ query: { matchId: matchId || '' } });
 const badge = document.getElementById('connBadge');
 
 socket.on('connect', () => { badge.textContent = 'živě'; badge.classList.remove('offline'); });

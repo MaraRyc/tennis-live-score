@@ -128,10 +128,11 @@ function winGame(state, winner) {
 }
 
 function winTiebreak(state, winner) {
-  // Vítěz tiebreaku bere set 7:6
+  // Vítěz tiebreaku bere set 7:6. Podání se během tiebreaku už střídalo po bodech
+  // (viz addPoint), takže tady se už nepřehazuje – server je správně nastavený
+  // na toho, kdo má podávat první game příští sady.
   if (winner === "A") state.currentSet.gamesA = 7;
   else state.currentSet.gamesB = 7;
-  switchServer(state);
   finishSet(state);
 }
 
@@ -140,8 +141,13 @@ function winSuperTiebreak(state, winner) {
   state.sets.push({ a: tb.pA, b: tb.pB, superTiebreak: true });
   state.superTiebreak = null;
   state.isSuperTiebreakSet = false;
-  switchServer(state);
   afterSetFinished(state);
+}
+
+// V (super)tiebreaku se podání střídá po 1. bodu a pak po každých 2 bodech.
+function maybeSwitchServerInBreaker(state, tb) {
+  const totalPoints = tb.pA + tb.pB;
+  if (totalPoints % 2 === 1) switchServer(state);
 }
 
 function addPoint(state, player, reason) {
@@ -168,6 +174,7 @@ function addPoint(state, player, reason) {
     const tb = state.superTiebreak;
     if (player === "A") tb.pA += 1;
     else tb.pB += 1;
+    maybeSwitchServerInBreaker(state, tb);
 
     const leader = Math.max(tb.pA, tb.pB);
     const diff = Math.abs(tb.pA - tb.pB);
@@ -181,6 +188,7 @@ function addPoint(state, player, reason) {
     const tb = state.tiebreak;
     if (player === "A") tb.pA += 1;
     else tb.pB += 1;
+    maybeSwitchServerInBreaker(state, tb);
 
     const leader = Math.max(tb.pA, tb.pB);
     const diff = Math.abs(tb.pA - tb.pB);
