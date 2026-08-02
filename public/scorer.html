@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Zadávání skóre</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="conn-badge" id="connBadge">připojování…</div>
+<div class="wrap">
+  <header class="top">
+    <h1>🎾 Zadávání skóre</h1>
+    <p>Klepnutím na tlačítko přidáte bod hráči.</p>
+  </header>
+
+  <div class="card">
+    <div class="sets-row" id="setsRow"></div>
+
+    <div class="scoreboard">
+      <div class="player"><div class="name" id="nameA">Hráč A</div></div>
+      <div class="vs">vs</div>
+      <div class="player"><div class="name" id="nameB">Hráč B</div></div>
+    </div>
+
+    <div class="scoreboard">
+      <div class="player"><div class="point-value" id="pointA">0</div></div>
+      <div class="vs" id="gameLabel">GAME</div>
+      <div class="player"><div class="point-value" id="pointB">0</div></div>
+    </div>
+
+    <div class="status-line" id="statusLine"></div>
+    <div class="winner-banner" id="winnerBanner" style="display:none"></div>
+
+    <div class="controls">
+      <button class="btn-point" id="btnA">Bod pro A</button>
+      <button class="btn-point" id="btnB">Bod pro B</button>
+    </div>
+
+    <div class="row-secondary">
+      <button class="btn-secondary" id="btnUndo">↩ Zpět</button>
+      <button class="btn-secondary btn-danger" id="btnReset">Reset zápasu</button>
+    </div>
+
+    <div class="settings">
+      <div class="settings-row">
+        <div>
+          <label>Jméno hráče A</label>
+          <input type="text" id="inputNameA" maxlength="40" placeholder="Hráč A" />
+        </div>
+        <div>
+          <label>Jméno hráče B</label>
+          <input type="text" id="inputNameB" maxlength="40" placeholder="Hráč B" />
+        </div>
+      </div>
+      <label>Formát zápasu</label>
+      <select id="selectFormat">
+        <option value="2">Na 2 vítězné sety (best of 3)</option>
+        <option value="3">Na 3 vítězné sety (best of 5)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="link-row"><a href="viewer.html">Otevřít pohled diváka →</a></div>
+  <div class="link-row"><a href="index.html">← zpět na úvod</a></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const badge = document.getElementById('connBadge');
+let lastState = null;
+
+socket.on('connect', () => { badge.textContent = 'živě'; badge.classList.remove('offline'); });
+socket.on('disconnect', () => { badge.textContent = 'odpojeno'; badge.classList.add('offline'); });
+
+function render(payload) {
+  const { state, display } = payload;
+  lastState = state;
+
+  document.getElementById('nameA').textContent = state.playerA;
+  document.getElementById('nameB').textContent = state.playerB;
+  document.getElementById('btnA').textContent = `Bod pro ${state.playerA}`;
+  document.getElementById('btnB').textContent = `Bod pro ${state.playerB}`;
+
+  if (document.activeElement.id !== 'inputNameA') document.getElementById('inputNameA').placeholder = state.playerA;
+  if (document.activeElement.id !== 'inputNameB') document.getElementById('inputNameB').placeholder = state.playerB;
+  document.getElementById('selectFormat').value = String(state.setsToWin);
+
+  const setsRow = document.getElementById('setsRow');
+  setsRow.innerHTML = '';
+  state.sets.forEach((s, i) => {
+    const pill = document.createElement('div');
+    pill.className = 'set-pill';
+    pill.textContent = `Set ${i+1}: ${s.a}-${s.b}`;
+    setsRow.appendChild(pill);
+  });
+  if (!state.matchWinner) {
+    const pill = document.createElement('div');
+    pill.className = 'set-pill';
+    pill.textContent = `Hry: ${state.currentSet.gamesA}-${state.currentSet.gamesB}`;
+    setsRow.appendChild(pill);
+  }
+
+  const pointA = document.getElementById('pointA');
+  const pointB = document.getElementById('pointB');
+  const gameLabel = document.getElementById('gameLabel');
+  const statusLine = document.getElementById('statusLine');
+  const winnerBanner = document.getElementById('winnerBanner');
+  const btnA = document.getElementById('btnA');
+  const btnB = document.getElementById('btnB');
+
+  if (state.matchWinner) {
+    pointA.textContent = '-';
+    pointB.textContent = '-';
+    gameLabel.textContent = 'KONEC';
+    statusLine.textContent = '';
+    const winnerName = state.matchWinner === 'A' ? state.playerA : state.playerB;
+    winnerBanner.style.display = 'block';
+    winnerBanner.textContent = `🏆 Vítěz zápasu: ${winnerName}`;
+    btnA.disabled = true;
+    btnB.disabled = true;
+    return;
+  }
+  winnerBanner.style.display = 'none';
+  btnA.disabled = false;
+  btnB.disabled = false;
+
+  if (display.type === 'tiebreak') {
+    gameLabel.textContent = 'TIEBREAK';
+    pointA.textContent = display.a;
+    pointB.textContent = display.b;
+    statusLine.textContent = '';
+  } else if (display.type === 'deuce') {
+    gameLabel.textContent = 'GAME';
+    pointA.textContent = '40';
+    pointB.textContent = '40';
+    statusLine.textContent = 'Shoda (deuce)';
+  } else if (display.type === 'advantage') {
+    gameLabel.textContent = 'GAME';
+    pointA.textContent = display.side === 'A' ? 'Ad' : '40';
+    pointB.textContent = display.side === 'B' ? 'Ad' : '40';
+    statusLine.textContent = `Výhoda pro ${display.side === 'A' ? state.playerA : state.playerB}`;
+  } else {
+    gameLabel.textContent = 'GAME';
+    pointA.textContent = display.a;
+    pointB.textContent = display.b;
+    statusLine.textContent = '';
+  }
+}
+
+socket.on('state', render);
+
+document.getElementById('btnA').addEventListener('click', () => socket.emit('action', { type: 'point', player: 'A' }));
+document.getElementById('btnB').addEventListener('click', () => socket.emit('action', { type: 'point', player: 'B' }));
+document.getElementById('btnUndo').addEventListener('click', () => socket.emit('action', { type: 'undo' }));
+document.getElementById('btnReset').addEventListener('click', () => {
+  if (confirm('Opravdu vynulovat celý zápas?')) socket.emit('action', { type: 'reset' });
+});
+
+let nameTimer = null;
+function sendNames() {
+  clearTimeout(nameTimer);
+  nameTimer = setTimeout(() => {
+    const a = document.getElementById('inputNameA').value.trim();
+    const b = document.getElementById('inputNameB').value.trim();
+    if (a || b) socket.emit('action', { type: 'setNames', playerA: a, playerB: b });
+  }, 500);
+}
+document.getElementById('inputNameA').addEventListener('input', sendNames);
+document.getElementById('inputNameB').addEventListener('input', sendNames);
+
+document.getElementById('selectFormat').addEventListener('change', (e) => {
+  socket.emit('action', { type: 'setFormat', setsToWin: Number(e.target.value) });
+});
+</script>
+</body>
+</html>

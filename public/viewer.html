@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Živé skóre – sledování</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="conn-badge" id="connBadge">připojování…</div>
+<div class="wrap">
+  <header class="top">
+    <h1>🎾 Živé skóre</h1>
+    <p id="formatLabel">Sledování v reálném čase</p>
+  </header>
+
+  <div class="card">
+    <div class="sets-row" id="setsRow"></div>
+
+    <div class="scoreboard">
+      <div class="player">
+        <div class="name" id="nameA">Hráč A<span class="serve-dot" id="serveDotA" style="display:none"></span></div>
+      </div>
+      <div class="vs">vs</div>
+      <div class="player">
+        <div class="name" id="nameB"><span class="serve-dot" id="serveDotB" style="display:none"></span>Hráč B</div>
+      </div>
+    </div>
+
+    <div class="scoreboard">
+      <div class="player"><div class="point-value" id="pointA">0</div></div>
+      <div class="vs" id="gameLabel">GAME</div>
+      <div class="player"><div class="point-value" id="pointB">0</div></div>
+    </div>
+
+    <div class="status-line" id="statusLine"></div>
+    <div class="winner-banner" id="winnerBanner" style="display:none"></div>
+  </div>
+
+  <div class="link-row"><a href="index.html">← zpět</a></div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io();
+const badge = document.getElementById('connBadge');
+
+socket.on('connect', () => { badge.textContent = 'živě'; badge.classList.remove('offline'); });
+socket.on('disconnect', () => { badge.textContent = 'odpojeno'; badge.classList.add('offline'); });
+
+function render(payload) {
+  const { state, display } = payload;
+  document.getElementById('nameA').childNodes[0].textContent = state.playerA + ' ';
+  document.getElementById('nameB').lastChild.textContent = ' ' + state.playerB;
+
+  document.getElementById('serveDotA').style.display = state.server === 'A' && !state.matchWinner ? 'inline-block' : 'none';
+  document.getElementById('serveDotB').style.display = state.server === 'B' && !state.matchWinner ? 'inline-block' : 'none';
+
+  // Dokončené sety + aktuální set
+  const setsRow = document.getElementById('setsRow');
+  setsRow.innerHTML = '';
+  state.sets.forEach((s, i) => {
+    const pill = document.createElement('div');
+    pill.className = 'set-pill';
+    pill.textContent = `Set ${i+1}: ${s.a}-${s.b}`;
+    setsRow.appendChild(pill);
+  });
+  if (!state.matchWinner) {
+    const pill = document.createElement('div');
+    pill.className = 'set-pill';
+    pill.textContent = `Hry: ${state.currentSet.gamesA}-${state.currentSet.gamesB}`;
+    setsRow.appendChild(pill);
+  }
+
+  const pointA = document.getElementById('pointA');
+  const pointB = document.getElementById('pointB');
+  const gameLabel = document.getElementById('gameLabel');
+  const statusLine = document.getElementById('statusLine');
+  const winnerBanner = document.getElementById('winnerBanner');
+
+  if (state.matchWinner) {
+    pointA.textContent = '-';
+    pointB.textContent = '-';
+    gameLabel.textContent = 'KONEC';
+    statusLine.textContent = '';
+    const winnerName = state.matchWinner === 'A' ? state.playerA : state.playerB;
+    winnerBanner.style.display = 'block';
+    winnerBanner.textContent = `🏆 Vítěz zápasu: ${winnerName}`;
+    return;
+  }
+  winnerBanner.style.display = 'none';
+
+  if (display.type === 'tiebreak') {
+    gameLabel.textContent = 'TIEBREAK';
+    pointA.textContent = display.a;
+    pointB.textContent = display.b;
+    statusLine.textContent = '';
+  } else if (display.type === 'deuce') {
+    gameLabel.textContent = 'GAME';
+    pointA.textContent = '40';
+    pointB.textContent = '40';
+    statusLine.textContent = 'Shoda (deuce)';
+  } else if (display.type === 'advantage') {
+    gameLabel.textContent = 'GAME';
+    pointA.textContent = display.side === 'A' ? 'Ad' : '40';
+    pointB.textContent = display.side === 'B' ? 'Ad' : '40';
+    statusLine.textContent = `Výhoda pro ${display.side === 'A' ? state.playerA : state.playerB}`;
+  } else {
+    gameLabel.textContent = 'GAME';
+    pointA.textContent = display.a;
+    pointB.textContent = display.b;
+    statusLine.textContent = '';
+  }
+}
+
+socket.on('state', render);
+</script>
+</body>
+</html>
