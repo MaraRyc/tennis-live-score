@@ -78,6 +78,17 @@ async function main() {
     throw new Error("Nastavení supertiebreaku jako rozhodující sady se nepropsalo");
   }
 
+  // test ručního přehození podávajícího
+  const serverBefore = afterFormat.state.server;
+  const expectedNext = serverBefore === "A" ? "B" : "A";
+  scorer.emit("action", { type: "setServer", player: expectedNext });
+  await wait(150);
+  const afterSwap = viewerStates[viewerStates.length - 1];
+  if (afterSwap.state.server !== expectedNext) {
+    throw new Error(`Ruční přehození podávajícího selhalo, čekal jsem ${expectedNext}, dostal jsem ${afterSwap.state.server}`);
+  }
+  console.log("Test ručního přehození podávajícího OK.");
+
   // test izolace více zápasů: dva různé kódy zápasu se nesmí ovlivňovat
   const matchAlpha = io(URL, { transports: ["websocket"], query: { matchId: "ALPHA1" } });
   const matchBeta = io(URL, { transports: ["websocket"], query: { matchId: "BETA1" } });

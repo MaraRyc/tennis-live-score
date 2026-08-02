@@ -24,9 +24,18 @@
     <div class="sets-row" id="setsRow"></div>
 
     <div class="scoreboard">
-      <div class="player"><div class="name" id="nameA">Hráč A</div></div>
+      <div class="player">
+        <div class="name" id="nameA">Hráč A<span class="serve-dot" id="serveDotA" style="display:none"></span></div>
+      </div>
       <div class="vs">vs</div>
-      <div class="player"><div class="name" id="nameB">Hráč B</div></div>
+      <div class="player">
+        <div class="name" id="nameB"><span class="serve-dot" id="serveDotB" style="display:none"></span>Hráč B</div>
+      </div>
+    </div>
+
+    <div class="serve-row">
+      <span id="serveLabel">Podává: …</span>
+      <button class="btn-secondary" id="btnSwapServer">🔄 Vyměnit podání</button>
     </div>
 
     <div class="scoreboard">
@@ -134,10 +143,16 @@ function render(payload) {
   const { state, display } = payload;
   lastState = state;
 
-  document.getElementById('nameA').textContent = state.playerA;
-  document.getElementById('nameB').textContent = state.playerB;
+  document.getElementById('nameA').childNodes[0].textContent = state.playerA + ' ';
+  document.getElementById('nameB').lastChild.textContent = ' ' + state.playerB;
   document.getElementById('btnA').textContent = `Bod pro ${state.playerA}`;
   document.getElementById('btnB').textContent = `Bod pro ${state.playerB}`;
+
+  document.getElementById('serveDotA').style.display = state.server === 'A' && !state.matchWinner ? 'inline-block' : 'none';
+  document.getElementById('serveDotB').style.display = state.server === 'B' && !state.matchWinner ? 'inline-block' : 'none';
+  document.getElementById('serveLabel').textContent = state.matchWinner
+    ? 'Podání: zápas skončil'
+    : `Podává: ${state.server === 'A' ? state.playerA : state.playerB}`;
 
   if (document.activeElement.id !== 'inputNameA') document.getElementById('inputNameA').placeholder = state.playerA;
   if (document.activeElement.id !== 'inputNameB') document.getElementById('inputNameB').placeholder = state.playerB;
@@ -181,12 +196,14 @@ function render(payload) {
     winnerBanner.textContent = `🏆 Vítěz zápasu: ${winnerName}`;
     btnA.disabled = true;
     btnB.disabled = true;
+    document.getElementById('btnSwapServer').disabled = true;
     closeReasonPanel();
     return;
   }
   winnerBanner.style.display = 'none';
   btnA.disabled = false;
   btnB.disabled = false;
+  document.getElementById('btnSwapServer').disabled = false;
 
   if (display.type === 'superTiebreak') {
     gameLabel.textContent = 'SUPER TIEBREAK';
@@ -255,6 +272,12 @@ document.querySelectorAll('.btn-reason').forEach((btn) => {
     playPointFeedback();
     closeReasonPanel();
   });
+});
+
+document.getElementById('btnSwapServer').addEventListener('click', () => {
+  if (!lastState) return;
+  const nextServer = lastState.server === 'A' ? 'B' : 'A';
+  socket.emit('action', { type: 'setServer', player: nextServer });
 });
 
 document.getElementById('btnUndo').addEventListener('click', () => {

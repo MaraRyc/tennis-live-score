@@ -140,6 +140,15 @@ io.on("connection", (socket) => {
         }
         break;
       }
+      case "setServer": {
+        // Ruční přehození podávajícího (např. když appka podání netrefila,
+        // nebo si ho scorer chce jen opravit).
+        if (action.player !== "A" && action.player !== "B") return;
+        if (match.state.matchWinner) return;
+        pushHistory(match);
+        match.state.server = action.player;
+        break;
+      }
       default:
         return;
     }
