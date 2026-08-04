@@ -23,15 +23,28 @@ a instalaci jako appku na plochu telefonu.
 0-15-30-40, shoda a výhoda, tiebreak při 6:6 (do 7, rozdíl 2) se správným střídáním podání
 (po 1. bodu, pak po každých 2), zápas na 2 nebo 3 vítězné sety, volitelný supertiebreak do 10
 místo rozhodující (poslední) sady, undo posledního bodu, reset zápasu, vlastní jména hráčů.
+Na scoreru je vidět, kdo zrovna podává (míček u jména), a jde to ručně přehodit tlačítkem
+"🔄 Vyměnit podání", kdyby appka podání netrefila.
 
 ### Kategorizace bodů a statistiky
 
-U každého bodu si scorer může (nepovinně) vybrat, jak byl vyhrán: Winner, Eso, Vynucená chyba
-soupeře, Nevynucená chyba soupeře, Dvojchyba soupeře, nebo bez upřesnění. Eso jde vybrat jen když
-daný hráč zrovna podává, Dvojchyba soupeře jen když podává ten druhý. Na stránce statistik se z
-toho počítá délka zápasu a součty za oba hráče, s možností stáhnout podrobný log bodů (CSV),
+U každého bodu si scorer může (nepovinně) vybrat servis (1. nebo 2.) a jak byl bod vyhrán:
+Winner, Eso, Přímý bod z podání (soupeř se podání dotkl, ale nevrátil ho do hry), Vynucená chyba,
+Nevynucená chyba, Dvojchyba soupeře, nebo bez upřesnění. Eso a Přímý bod z podání jdou vybrat jen
+když daný hráč zrovna podává, Dvojchyba soupeře jen když podává ten druhý.
+
+Break pointy a game pointy (proměněné i nevyužité) appka sleduje automaticky podle skóre hry –
+scorer u nich nic nevybírá. Na stránce statistik se počítá délka zápasu, součty za oba hráče
+(včetně % bodů vyhraných po 1. a po 2. servisu), s možností stáhnout podrobný log bodů (CSV),
 textové shrnutí (TXT), nebo rovnou sdílet krátký výsledek (tlačítko Sdílet – použije nativní sdílení
 na mobilu, jinak zkopíruje text do schránky).
+
+### Displej diváka nezhasíná
+
+Na `viewer.html` appka standardně drží displej zapnutý (Screen Wake Lock API), aby sledující nemuseli
+telefon pořád znovu odemykat. Jde to vypnout zaškrtávátkem "Nenechat zhasnout displej". Funguje na
+většině moderních prohlížečů (Safari 16.4+, Chrome, Edge); pokud prohlížeč funkci nepodporuje, appka
+to napíše a jinak normálně funguje dál.
 
 ### Více zápasů najednou
 

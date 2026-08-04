@@ -1,7 +1,14 @@
 // matchLogic.js
 // Čistá logika tenisového skóre (bez závislosti na serveru), snadno testovatelná.
 
-const POINT_REASONS = ["winner", "ace", "forced_error", "unforced_error", "double_fault"];
+const POINT_REASONS = [
+  "winner",
+  "ace",
+  "service_winner",
+  "forced_error",
+  "unforced_error",
+  "double_fault",
+];
 
 function freshGame() {
   return { pA: 0, pB: 0 }; // syrové body ve hře (mimo tiebreak)
@@ -34,7 +41,7 @@ function initialState(
     lastPointReason: null,
     startedAt: null, // čas prvního bodu
     endedAt: null, // čas konce zápasu
-    pointLog: [], // historie bodů pro statistiky: {t, winner, reason, server, setIndex, superTiebreak}
+    pointLog: [], // historie bodů: {t, winner, reason, server, serveNumber, setIndex, superTiebreak, opportunity, converted}
   };
 }
 
@@ -150,24 +157,50 @@ function maybeSwitchServerInBreaker(state, tb) {
   if (totalPoints % 2 === 1) switchServer(state);
 }
 
-function addPoint(state, player, reason) {
+// Zjistí, jestli je aktuální stav hry (před odehráním bodu) pro někoho break/game point.
+// Vrátí { type: 'break'|'game', player } nebo null. Platí jen pro běžné hry (ne tiebreaky).
+function detectOpportunity(state, g) {
+  const leader = Math.max(g.pA, g.pB);
+  const diff = Math.abs(g.pA - g.pB);
+  // leader < 3: nikdo ještě nemá 40. diff < 1: shoda (40:40) – tam vede až
+  // výhoda, samotná shoda se za break/game point nepočítá.
+  if (leader < 3 || diff < 1) return null;
+  const leadingPlayer = g.pA > g.pB ? "A" : "B";
+  const type = leadingPlayer === state.server ? "game" : "break";
+  return { type, player: leadingPlayer };
+}
+
+function addPoint(state, player, reason, serveNumber) {
   if (state.matchWinner) return state; // zápas už skončil, ignorovat
   if (player !== "A" && player !== "B") return state;
 
   const normalizedReason = POINT_REASONS.includes(reason) ? reason : null;
+  // Dvojchyba je z definice o tom, že selhal i 2. servis – servisní číslo se
+  // proto vždy vynutí na 2, ať scorer vybral cokoliv.
+  const normalizedServeNumber = normalizedReason === "double_fault" ? 2 : serveNumber === 2 ? 2 : 1;
 
   if (!state.startedAt) state.startedAt = Date.now();
 
   state.lastPointWinner = player;
   state.lastPointReason = normalizedReason;
 
+  // Break/game point se sleduje jen v běžné hře (ne v tiebreaku) – musí se
+  // spočítat PŘED přičtením tohoto bodu, protože zjišťujeme, jestli tenhle
+  // bod byl příležitostí k výhře hry.
+  const opportunity =
+    !state.tiebreak && !state.isSuperTiebreakSet ? detectOpportunity(state, state.currentGame) : null;
+  const converted = opportunity ? opportunity.player === player : null;
+
   state.pointLog.push({
     t: Date.now(),
     winner: player,
     reason: normalizedReason,
     server: state.server,
+    serveNumber: normalizedServeNumber,
     setIndex: state.sets.length,
     superTiebreak: !!state.isSuperTiebreakSet,
+    opportunity,
+    converted,
   });
 
   if (state.isSuperTiebreakSet) {
@@ -224,12 +257,28 @@ function formatDuration(ms) {
   return parts.join(" ");
 }
 
-// Spočítá agregované statistiky z point logu (winnery, esa, chyby, délku zápasu atd.)
-function computeStats(state) {
-  const stats = {
-    A: { pointsWon: 0, winners: 0, aces: 0, forcedErrors: 0, unforcedErrors: 0, doubleFaults: 0 },
-    B: { pointsWon: 0, winners: 0, aces: 0, forcedErrors: 0, unforcedErrors: 0, doubleFaults: 0 },
+function freshPlayerStats() {
+  return {
+    pointsWon: 0,
+    winners: 0,
+    aces: 0,
+    serviceWinners: 0,
+    forcedErrors: 0,
+    unforcedErrors: 0,
+    doubleFaults: 0,
+    breakPointsChances: 0,
+    breakPointsWon: 0,
+    gamePointsChances: 0,
+    gamePointsWon: 0,
+    firstServe: { played: 0, won: 0 },
+    secondServe: { played: 0, won: 0 },
   };
+}
+
+// Spočítá agregované statistiky z point logu (winnery, esa, chyby, break/game pointy,
+// úspěšnost po 1./2. servisu, délku zápasu atd.)
+function computeStats(state) {
+  const stats = { A: freshPlayerStats(), B: freshPlayerStats() };
 
   for (const p of state.pointLog) {
     const winner = p.winner;
@@ -242,6 +291,9 @@ function computeStats(state) {
       case "ace":
         stats[winner].aces += 1;
         break;
+      case "service_winner":
+        stats[winner].serviceWinners += 1;
+        break;
       case "forced_error":
         stats[loser].forcedErrors += 1;
         break;
@@ -253,6 +305,20 @@ function computeStats(state) {
         break;
       default:
         break;
+    }
+
+    if (p.opportunity) {
+      const key = p.opportunity.type === "break" ? "breakPoints" : "gamePoints";
+      stats[p.opportunity.player][`${key}Chances`] += 1;
+      if (p.converted) stats[p.opportunity.player][`${key}Won`] += 1;
+    }
+
+    // Statistika servisu se počítá vždy podle toho, kdo v daném bodě podával.
+    const serverPlayer = p.server;
+    if (serverPlayer === "A" || serverPlayer === "B") {
+      const bucket = p.serveNumber === 2 ? "secondServe" : "firstServe";
+      stats[serverPlayer][bucket].played += 1;
+      if (p.winner === serverPlayer) stats[serverPlayer][bucket].won += 1;
     }
   }
 

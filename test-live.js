@@ -87,6 +87,23 @@ async function main() {
   if (afterSwap.state.server !== expectedNext) {
     throw new Error(`Ruční přehození podávajícího selhalo, čekal jsem ${expectedNext}, dostal jsem ${afterSwap.state.server}`);
   }
+
+  // test kategorie "přímý bod z podání" + servisní číslo se promítne do stats payloadu
+  scorer.emit("action", { type: "reset" });
+  await wait(150);
+  scorer.emit("action", { type: "point", player: "A", reason: "service_winner", serveNumber: 2 });
+  await wait(200);
+  const afterServiceWinner = viewerStates[viewerStates.length - 1];
+  if (afterServiceWinner.state.lastPointReason !== "service_winner") {
+    throw new Error("Kategorie 'přímý bod z podání' se nepropsala do stavu");
+  }
+  if (afterServiceWinner.stats.stats.A.serviceWinners !== 1) {
+    throw new Error("Statistika 'přímý bod z podání' se nespočítala, dostal jsem " + JSON.stringify(afterServiceWinner.stats.stats.A));
+  }
+  if (afterServiceWinner.stats.stats.A.secondServe.played !== 1 || afterServiceWinner.stats.stats.A.secondServe.won !== 1) {
+    throw new Error("Statistika 2. servisu se nespočítala správně: " + JSON.stringify(afterServiceWinner.stats.stats.A.secondServe));
+  }
+  console.log("Test 'přímý bod z podání' + servisní statistiky OK.");
   console.log("Test ručního přehození podávajícího OK.");
 
   // test izolace více zápasů: dva různé kódy zápasu se nesmí ovlivňovat

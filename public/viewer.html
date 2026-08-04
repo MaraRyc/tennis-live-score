@@ -42,6 +42,12 @@
     <div class="status-line" id="statusLine"></div>
     <div class="last-point-line" id="lastPointLine"></div>
     <div class="winner-banner" id="winnerBanner" style="display:none"></div>
+
+    <label class="checkbox-label" style="justify-content:center; margin-top:16px;">
+      <input type="checkbox" id="checkboxWakeLock" checked />
+      Nenechat zhasnout displej
+    </label>
+    <p class="empty-note" id="wakeLockStatus" style="padding:4px 0 0; font-size:0.78rem;"></p>
   </div>
 
   <div class="link-row"><a href="stats.html" data-match-link="stats.html">Zobrazit statistiky zápasu →</a></div>
@@ -62,6 +68,50 @@ const badge = document.getElementById('connBadge');
 
 socket.on('connect', () => { badge.textContent = 'živě'; badge.classList.remove('offline'); });
 socket.on('disconnect', () => { badge.textContent = 'odpojeno'; badge.classList.add('offline'); });
+
+// Wake Lock: nenechá zhasnout displej diváka, dokud sleduje zápas.
+let wakeLock = null;
+const wakeLockStatus = document.getElementById('wakeLockStatus');
+const checkboxWakeLock = document.getElementById('checkboxWakeLock');
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) {
+    wakeLockStatus.textContent = 'Tento prohlížeč bohužel nepodporuje automatické udržení displeje zapnutého.';
+    return;
+  }
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLockStatus.textContent = '✅ Displej zůstane zapnutý, dokud je appka otevřená.';
+    wakeLock.addEventListener('release', () => {
+      wakeLockStatus.textContent = checkboxWakeLock.checked
+        ? 'Displej se uvolnil (např. přepnutí appky) – vraťte se sem, obnoví se.'
+        : '';
+    });
+  } catch (e) {
+    wakeLockStatus.textContent = 'Nepodařilo se udržet displej zapnutý (může blokovat úsporný režim).';
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release();
+    wakeLock = null;
+  }
+  wakeLockStatus.textContent = '';
+}
+
+checkboxWakeLock.addEventListener('change', () => {
+  if (checkboxWakeLock.checked) requestWakeLock();
+  else releaseWakeLock();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && checkboxWakeLock.checked && !wakeLock) {
+    requestWakeLock();
+  }
+});
+
+if (checkboxWakeLock.checked) requestWakeLock();
 
 function render(payload) {
   const { state, display } = payload;
@@ -99,8 +149,9 @@ function render(payload) {
   const REASON_LABELS = {
     winner: 'Winner',
     ace: 'Eso',
-    forced_error: 'Vynucená chyba soupeře',
-    unforced_error: 'Nevynucená chyba soupeře',
+    service_winner: 'Přímý bod z podání',
+    forced_error: 'Vynucená chyba',
+    unforced_error: 'Nevynucená chyba',
     double_fault: 'Dvojchyba soupeře',
   };
   if (state.lastPointWinner && state.lastPointReason && REASON_LABELS[state.lastPointReason]) {

@@ -187,4 +187,55 @@ function play(state, seq) {
   console.log("Test 11 OK: střídání podání v tiebreaku (1, pak po dvou)");
 }
 
+// Test 12: breakpoint detekce a proměnění (0:40 -> B bere break)
+{
+  const s = initialState(); // server začíná 'A'
+  play(s, ["B", "B", "B"]); // 0:40, ještě žádný z bodů nebyl "break point" (0-0,0-15,0-30)
+  assert.ok(s.pointLog.every((p) => p.opportunity === null), "před 0:40 by neměl být žádný breakpoint");
+
+  addPoint(s, "B"); // B využije break point
+  const last = s.pointLog[s.pointLog.length - 1];
+  assert.deepStrictEqual(last.opportunity, { type: "break", player: "B" });
+  assert.strictEqual(last.converted, true);
+  assert.strictEqual(s.currentSet.gamesB, 1, "B měl vyhrát hru (breaknout podání)");
+  console.log("Test 12 OK: breakpoint se správně detekuje a proměňuje");
+}
+
+// Test 13: gamepoint - nejdřív neproměněný, pak proměněný
+{
+  const s = initialState(); // server 'A'
+  play(s, ["A", "A", "A"]); // 40:0 - game point pro A (podává)
+  addPoint(s, "B"); // A ho nevyužije -> 40:15
+  let last = s.pointLog[s.pointLog.length - 1];
+  assert.deepStrictEqual(last.opportunity, { type: "game", player: "A" });
+  assert.strictEqual(last.converted, false);
+
+  addPoint(s, "A"); // teď A game point využije -> vyhrává hru
+  last = s.pointLog[s.pointLog.length - 1];
+  assert.strictEqual(last.converted, true);
+  assert.strictEqual(s.currentSet.gamesA, 1);
+
+  const { stats } = computeStats(s);
+  assert.strictEqual(stats.A.gamePointsChances, 2);
+  assert.strictEqual(stats.A.gamePointsWon, 1);
+  console.log("Test 13 OK: gamepoint neproměněný i proměněný se počítá správně");
+}
+
+// Test 14: kategorie "přímý bod z podání" (service winner), dvojchyba a 1./2. servis
+{
+  const s = initialState(); // server 'A'
+  addPoint(s, "A", "ace", 1); // eso na 1. servis
+  addPoint(s, "B", "double_fault", 1); // dvojchyba (i když přišel serveNumber 1, vynutí se 2)
+  addPoint(s, "A", "service_winner", 2); // přímý bod z podání na 2. servis
+
+  const { stats } = computeStats(s);
+  assert.strictEqual(stats.A.serviceWinners, 1);
+  assert.strictEqual(stats.A.doubleFaults, 1, "dvojchyba se počítá hráči, který podával (A), ne tomu kdo bod vyhrál");
+  assert.strictEqual(stats.A.firstServe.played, 1);
+  assert.strictEqual(stats.A.firstServe.won, 1);
+  assert.strictEqual(stats.A.secondServe.played, 2, "dvojchyba i service winner na 2. servis se počítají do 2. servisu");
+  assert.strictEqual(stats.A.secondServe.won, 1, "z toho jen service winner byl vyhraný, dvojchyba prohraná");
+  console.log("Test 14 OK: service winner, dvojchyba a 1./2. servis se počítají správně");
+}
+
 console.log("\nVšechny testy prošly.");

@@ -54,11 +54,19 @@
 
     <div class="reason-panel" id="reasonPanel" style="display:none">
       <div class="reason-title" id="reasonTitle">Bod pro …</div>
+
+      <div class="serve-number-row">
+        <span>Servis:</span>
+        <button class="btn-serve-num active" data-serve="1" id="serveNum1">1.</button>
+        <button class="btn-serve-num" data-serve="2" id="serveNum2">2.</button>
+      </div>
+
       <div class="reason-grid">
         <button class="btn-reason" data-reason="winner">Winner</button>
         <button class="btn-reason" data-reason="ace" id="reasonAce">Eso</button>
-        <button class="btn-reason" data-reason="forced_error">Vynucená chyba soupeře</button>
-        <button class="btn-reason" data-reason="unforced_error">Nevynucená chyba soupeře</button>
+        <button class="btn-reason" data-reason="service_winner" id="reasonServiceWinner">Přímý bod z podání</button>
+        <button class="btn-reason" data-reason="forced_error">Vynucená chyba</button>
+        <button class="btn-reason" data-reason="unforced_error">Nevynucená chyba</button>
         <button class="btn-reason" data-reason="double_fault" id="reasonDF">Dvojchyba soupeře</button>
         <button class="btn-reason btn-reason-muted" data-reason="">Bez upřesnění</button>
       </div>
@@ -238,16 +246,26 @@ socket.on('state', render);
 const pointButtons = document.getElementById('pointButtons');
 const reasonPanel = document.getElementById('reasonPanel');
 const reasonTitle = document.getElementById('reasonTitle');
+let selectedServeNumber = 1;
+
+function setServeNumber(n) {
+  selectedServeNumber = n;
+  document.getElementById('serveNum1').classList.toggle('active', n === 1);
+  document.getElementById('serveNum2').classList.toggle('active', n === 2);
+}
 
 function openReasonPanel(player) {
   if (!lastState || lastState.matchWinner) return;
   pendingPlayer = player;
   const name = player === 'A' ? lastState.playerA : lastState.playerB;
   reasonTitle.textContent = `Bod pro ${name} — jak byl vyhrán?`;
+  setServeNumber(1); // každý nový bod se začíná odhadem "1. servis"
 
-  // Eso dává smysl jen když tento hráč podává; dvojchyba jen když podává soupeř.
+  // Eso a přímý bod z podání dávají smysl jen když tento hráč podává;
+  // dvojchyba jen když podává soupeř.
   const isServer = lastState.server === player;
   document.getElementById('reasonAce').style.display = isServer ? 'block' : 'none';
+  document.getElementById('reasonServiceWinner').style.display = isServer ? 'block' : 'none';
   document.getElementById('reasonDF').style.display = isServer ? 'none' : 'block';
 
   pointButtons.style.display = 'none';
@@ -264,11 +282,14 @@ document.getElementById('btnA').addEventListener('click', () => openReasonPanel(
 document.getElementById('btnB').addEventListener('click', () => openReasonPanel('B'));
 document.getElementById('reasonCancel').addEventListener('click', closeReasonPanel);
 
+document.getElementById('serveNum1').addEventListener('click', () => setServeNumber(1));
+document.getElementById('serveNum2').addEventListener('click', () => setServeNumber(2));
+
 document.querySelectorAll('.btn-reason').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (!pendingPlayer) return;
     const reason = btn.getAttribute('data-reason') || undefined;
-    socket.emit('action', { type: 'point', player: pendingPlayer, reason });
+    socket.emit('action', { type: 'point', player: pendingPlayer, reason, serveNumber: selectedServeNumber });
     playPointFeedback();
     closeReasonPanel();
   });

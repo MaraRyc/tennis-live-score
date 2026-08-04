@@ -301,6 +301,29 @@ button {
   padding: 16px;
 }
 
+.serve-number-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.btn-serve-num {
+  background: #ccd4cb;
+  color: var(--ink);
+  padding: 6px 14px;
+  font-size: 0.85rem;
+  border-radius: 8px;
+}
+
+.btn-serve-num.active {
+  background: var(--court);
+  color: white;
+}
+
 .reason-title {
   font-weight: 700;
   text-align: center;

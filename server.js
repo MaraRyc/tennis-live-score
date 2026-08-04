@@ -101,7 +101,7 @@ io.on("connection", (socket) => {
       case "point": {
         if (action.player !== "A" && action.player !== "B") return;
         pushHistory(match);
-        addPoint(match.state, action.player, action.reason);
+        addPoint(match.state, action.player, action.reason, action.serveNumber);
         break;
       }
       case "undo": {

@@ -40,9 +40,14 @@
         <tr><td>Vyhrané body celkem</td><td id="pointsA">0</td><td id="pointsB">0</td></tr>
         <tr><td>Winnery</td><td id="winnersA">0</td><td id="winnersB">0</td></tr>
         <tr><td>Esa</td><td id="acesA">0</td><td id="acesB">0</td></tr>
-        <tr><td>Vynucené chyby soupeře</td><td id="feA">0</td><td id="feB">0</td></tr>
-        <tr><td>Nevynucené chyby soupeře</td><td id="ueA">0</td><td id="ueB">0</td></tr>
+        <tr><td>Přímý bod z podání</td><td id="swA">0</td><td id="swB">0</td></tr>
+        <tr><td>Vynucené chyby</td><td id="feA">0</td><td id="feB">0</td></tr>
+        <tr><td>Nevynucené chyby</td><td id="ueA">0</td><td id="ueB">0</td></tr>
         <tr><td>Dvojchyby soupeře</td><td id="dfA">0</td><td id="dfB">0</td></tr>
+        <tr><td>Breakpointy (proměněné/celkem)</td><td id="bpA">0/0</td><td id="bpB">0/0</td></tr>
+        <tr><td>Gamepointy (proměněné/celkem)</td><td id="gpA">0/0</td><td id="gpB">0/0</td></tr>
+        <tr><td>1. servis (vyhráno, %)</td><td id="s1A">0/0</td><td id="s1B">0/0</td></tr>
+        <tr><td>2. servis (vyhráno, %)</td><td id="s2A">0/0</td><td id="s2B">0/0</td></tr>
       </tbody>
     </table>
 
@@ -81,6 +86,12 @@ let lastPayload = null;
 socket.on('connect', () => { badge.textContent = 'živě'; badge.classList.remove('offline'); });
 socket.on('disconnect', () => { badge.textContent = 'odpojeno'; badge.classList.add('offline'); });
 
+function formatServePct(serve) {
+  if (!serve || serve.played === 0) return '0/0';
+  const pct = Math.round((serve.won / serve.played) * 100);
+  return `${serve.won}/${serve.played} (${pct} %)`;
+}
+
 function render(payload) {
   lastPayload = payload;
   const { state, stats } = payload;
@@ -113,12 +124,24 @@ function render(payload) {
   document.getElementById('winnersB').textContent = B.winners;
   document.getElementById('acesA').textContent = A.aces;
   document.getElementById('acesB').textContent = B.aces;
+  document.getElementById('swA').textContent = A.serviceWinners;
+  document.getElementById('swB').textContent = B.serviceWinners;
   document.getElementById('feA').textContent = A.forcedErrors;
   document.getElementById('feB').textContent = B.forcedErrors;
   document.getElementById('ueA').textContent = A.unforcedErrors;
   document.getElementById('ueB').textContent = B.unforcedErrors;
   document.getElementById('dfA').textContent = A.doubleFaults;
   document.getElementById('dfB').textContent = B.doubleFaults;
+
+  document.getElementById('bpA').textContent = `${A.breakPointsWon}/${A.breakPointsChances}`;
+  document.getElementById('bpB').textContent = `${B.breakPointsWon}/${B.breakPointsChances}`;
+  document.getElementById('gpA').textContent = `${A.gamePointsWon}/${A.gamePointsChances}`;
+  document.getElementById('gpB').textContent = `${B.gamePointsWon}/${B.gamePointsChances}`;
+
+  document.getElementById('s1A').textContent = formatServePct(A.firstServe);
+  document.getElementById('s1B').textContent = formatServePct(B.firstServe);
+  document.getElementById('s2A').textContent = formatServePct(A.secondServe);
+  document.getElementById('s2B').textContent = formatServePct(B.secondServe);
 
   const anyReasonLogged = state.pointLog.some((p) => p.reason);
   const showNote = stats.totalPoints > 0 && !anyReasonLogged;
@@ -142,8 +165,9 @@ function triggerDownload(filename, content, mime) {
 const REASON_LABELS = {
   winner: 'Winner',
   ace: 'Eso',
-  forced_error: 'Vynucená chyba soupeře',
-  unforced_error: 'Nevynucená chyba soupeře',
+  service_winner: 'Přímý bod z podání',
+  forced_error: 'Vynucená chyba',
+  unforced_error: 'Nevynucená chyba',
   double_fault: 'Dvojchyba soupeře',
 };
 
@@ -158,15 +182,21 @@ function csvEscape(value) {
 document.getElementById('btnDownloadCsv').addEventListener('click', () => {
   if (!lastPayload) return;
   const { state } = lastPayload;
-  const rows = [['#', 'Čas', 'Set', 'Vyhrál bod', 'Podával', 'Důvod', 'Supertiebreak']];
+  const rows = [['#', 'Čas', 'Set', 'Vyhrál bod', 'Podával', 'Servis', 'Důvod', 'Příležitost', 'Proměněno', 'Supertiebreak']];
   state.pointLog.forEach((p, i) => {
+    const opportunityLabel = p.opportunity
+      ? (p.opportunity.type === 'break' ? 'Breakpoint' : 'Gamepoint') + ' pro ' + (p.opportunity.player === 'A' ? state.playerA : state.playerB)
+      : '';
     rows.push([
       i + 1,
       new Date(p.t).toLocaleString('cs-CZ'),
       p.setIndex + 1,
       p.winner === 'A' ? state.playerA : state.playerB,
       p.server === 'A' ? state.playerA : state.playerB,
+      p.serveNumber === 2 ? '2.' : '1.',
       p.reason ? REASON_LABELS[p.reason] || p.reason : '',
+      opportunityLabel,
+      p.opportunity ? (p.converted ? 'ano' : 'ne') : '',
       p.superTiebreak ? 'ano' : 'ne',
     ]);
   });
@@ -194,9 +224,14 @@ function buildFullReport(state, stats) {
   row('Vyhrané body celkem', A.pointsWon, B.pointsWon);
   row('Winnery', A.winners, B.winners);
   row('Esa', A.aces, B.aces);
-  row('Vynucené chyby soupeře', A.forcedErrors, B.forcedErrors);
-  row('Nevynucené chyby soupeře', A.unforcedErrors, B.unforcedErrors);
+  row('Přímý bod z podání', A.serviceWinners, B.serviceWinners);
+  row('Vynucené chyby', A.forcedErrors, B.forcedErrors);
+  row('Nevynucené chyby', A.unforcedErrors, B.unforcedErrors);
   row('Dvojchyby soupeře', A.doubleFaults, B.doubleFaults);
+  row('Breakpointy (proměněné/celkem)', `${A.breakPointsWon}/${A.breakPointsChances}`, `${B.breakPointsWon}/${B.breakPointsChances}`);
+  row('Gamepointy (proměněné/celkem)', `${A.gamePointsWon}/${A.gamePointsChances}`, `${B.gamePointsWon}/${B.gamePointsChances}`);
+  row('1. servis (vyhráno/odehráno)', formatServePct(A.firstServe), formatServePct(B.firstServe));
+  row('2. servis (vyhráno/odehráno)', formatServePct(A.secondServe), formatServePct(B.secondServe));
   lines.push('');
   lines.push(`Celkem odehraných bodů: ${stats.totalPoints}`);
   return lines.join('\n');
