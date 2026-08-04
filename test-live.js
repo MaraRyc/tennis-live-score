@@ -1,8 +1,38 @@
 // Ověří, že scorer klient odesílá body a viewer klient je vidí živě přes websocket.
 const { io } = require("socket.io-client");
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 
 const URL = "http://localhost:3000";
+
+// Simulace zápasu uloženého starší verzí appky (bez polí paused/pauses/retired...),
+// aby se ověřilo, že appka na starých datech po upgradu nepadá.
+function writeOldSchemaFixture() {
+  const dataDir = path.join(__dirname, "data");
+  fs.mkdirSync(dataDir, { recursive: true });
+  const oldShapeState = {
+    playerA: "Stará A",
+    playerB: "Stará B",
+    setsToWin: 2,
+    deciderSuperTiebreak: false,
+    sets: [],
+    currentSet: { gamesA: 1, gamesB: 0 },
+    currentGame: { pA: 1, pB: 0 },
+    tiebreak: null,
+    isSuperTiebreakSet: false,
+    superTiebreak: null,
+    server: "A",
+    matchWinner: null,
+    lastPointWinner: "A",
+    lastPointReason: null,
+    startedAt: Date.now() - 1000,
+    endedAt: null,
+    pointLog: [{ t: Date.now() - 1000, winner: "A", reason: null, server: "A", setIndex: 0 }],
+    // záměrně chybí: paused, pauseReason, pauses, retired, retiredPlayer, retirementReason
+  };
+  fs.writeFileSync(path.join(dataDir, "OLDSCHEMA.json"), JSON.stringify(oldShapeState));
+}
 
 function httpGet(pathname) {
   return new Promise((resolve, reject) => {
@@ -14,6 +44,24 @@ function httpGet(pathname) {
 }
 
 async function main() {
+  // Zpětná kompatibilita: appka nesmí spadnout, když se připojí k zápasu
+  // uloženému starší verzí (bez novějších polí paused/pauses/retired...).
+  writeOldSchemaFixture();
+  const oldSchemaClient = io(URL, { transports: ["websocket"], query: { matchId: "OLDSCHEMA" } });
+  const oldSchemaPayload = await new Promise((resolve, reject) => {
+    oldSchemaClient.on("state", resolve);
+    oldSchemaClient.on("connect_error", reject);
+    setTimeout(() => reject(new Error("timeout při čekání na stav starého zápasu")), 3000);
+  });
+  if (!oldSchemaPayload.stats || !Array.isArray(oldSchemaPayload.stats.interruptions)) {
+    throw new Error("Zápas se starým schématem se nenačetl správně: " + JSON.stringify(oldSchemaPayload.stats));
+  }
+  if (oldSchemaPayload.state.playerA !== "Stará A" || oldSchemaPayload.display.a !== 15) {
+    throw new Error("Stará data zápasu se nenačetla správně: " + JSON.stringify(oldSchemaPayload.state));
+  }
+  oldSchemaClient.close();
+  console.log("Test zpětné kompatibility se starým schématem OK.");
+
   const scorer = io(URL, { transports: ["websocket"] });
   const viewer = io(URL, { transports: ["websocket"] });
 
@@ -105,6 +153,47 @@ async function main() {
   }
   console.log("Test 'přímý bod z podání' + servisní statistiky OK.");
   console.log("Test ručního přehození podávajícího OK.");
+
+  // test přerušení hry: body se během pauzy nemají počítat, po pokračování zase ano
+  scorer.emit("action", { type: "reset" });
+  await wait(150);
+  scorer.emit("action", { type: "pause", reason: "Déšť" });
+  await wait(150);
+  const afterPause = viewerStates[viewerStates.length - 1];
+  if (afterPause.state.paused !== true || afterPause.state.pauseReason !== "Déšť") {
+    throw new Error("Přerušení hry se nepropsalo do stavu: " + JSON.stringify(afterPause.state.paused) + " / " + afterPause.state.pauseReason);
+  }
+  scorer.emit("action", { type: "point", player: "A" }); // během pauzy by se neměl počítat
+  await wait(200);
+  const duringPause = viewerStates[viewerStates.length - 1];
+  if (duringPause.display.a !== 0) {
+    throw new Error("Bod zadaný během pauzy se neměl počítat, dostal jsem " + JSON.stringify(duringPause.display));
+  }
+  scorer.emit("action", { type: "resume" });
+  await wait(150);
+  const afterResume = viewerStates[viewerStates.length - 1];
+  if (afterResume.state.paused !== false) {
+    throw new Error("Hra se po 'resume' neměla vrátit do stavu paused=false");
+  }
+  scorer.emit("action", { type: "point", player: "A" }); // teď už se má počítat
+  await wait(200);
+  const afterResumePoint = viewerStates[viewerStates.length - 1];
+  if (afterResumePoint.display.a !== 15) {
+    throw new Error("Bod po 'resume' se neměl ignorovat, dostal jsem " + JSON.stringify(afterResumePoint.display));
+  }
+  console.log("Test přerušení hry (pauza/pokračování) OK.");
+
+  // test předčasného ukončení zápasu (skreč)
+  scorer.emit("action", { type: "retire", player: "B", reason: "zranění kolena" });
+  await wait(200);
+  const afterRetire = viewerStates[viewerStates.length - 1];
+  if (afterRetire.state.matchWinner !== "A" || afterRetire.state.retired !== true) {
+    throw new Error("Skreč se nepropsala správně: " + JSON.stringify({ winner: afterRetire.state.matchWinner, retired: afterRetire.state.retired }));
+  }
+  if (afterRetire.state.retirementReason !== "zranění kolena") {
+    throw new Error("Důvod skreče se nepropsal správně: " + afterRetire.state.retirementReason);
+  }
+  console.log("Test předčasného ukončení zápasu (skreč) OK.");
 
   // test izolace více zápasů: dva různé kódy zápasu se nesmí ovlivňovat
   const matchAlpha = io(URL, { transports: ["websocket"], query: { matchId: "ALPHA1" } });

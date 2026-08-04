@@ -39,6 +39,14 @@ scorer u nich nic nevybírá. Na stránce statistik se počítá délka zápasu,
 textové shrnutí (TXT), nebo rovnou sdílet krátký výsledek (tlačítko Sdílet – použije nativní sdílení
 na mobilu, jinak zkopíruje text do schránky).
 
+### Přerušení hry a předčasné ukončení (skreč)
+
+Tlačítkem "⏸ Přerušit hru" scorer zápas pozastaví a vybere důvod (déšť, ošetření, tma, nebo vlastní
+text) – po dobu přerušení nejde zadávat body, diváci vidí banner s důvodem, a hra pokračuje
+tlačítkem "▶️ Pokračovat ve hře". Tlačítkem "🏳 Ukončit zápas (skreč)" scorer předčasně ukončí zápas
+vzdáním jednoho z hráčů (nepovinně s důvodem, např. zranění) – vítězem se automaticky stává soupeř.
+Obojí se ukládá i do statistik (přehled přerušení, poznámka o skreči).
+
 ### Displej diváka nezhasíná
 
 Na `viewer.html` appka standardně drží displej zapnutý (Screen Wake Lock API), aby sledující nemuseli

@@ -1,5 +1,13 @@
 const assert = require("assert");
-const { initialState, addPoint, gameScoreDisplay, computeStats } = require("./matchLogic");
+const {
+  initialState,
+  addPoint,
+  gameScoreDisplay,
+  computeStats,
+  pauseMatch,
+  resumeMatch,
+  retireMatch,
+} = require("./matchLogic");
 
 function play(state, seq) {
   for (const p of seq) addPoint(state, p);
@@ -236,6 +244,56 @@ function play(state, seq) {
   assert.strictEqual(stats.A.secondServe.played, 2, "dvojchyba i service winner na 2. servis se počítají do 2. servisu");
   assert.strictEqual(stats.A.secondServe.won, 1, "z toho jen service winner byl vyhraný, dvojchyba prohraná");
   console.log("Test 14 OK: service winner, dvojchyba a 1./2. servis se počítají správně");
+}
+
+// Test 15: přerušení hry (pauza) blokuje body a jde ho ukončit
+{
+  const s = initialState();
+  addPoint(s, "A");
+  pauseMatch(s, "Déšť");
+  assert.strictEqual(s.paused, true);
+  assert.strictEqual(s.pauseReason, "Déšť");
+
+  const before = gameScoreDisplay(s);
+  addPoint(s, "A"); // během pauzy se bod nemá připsat
+  assert.deepStrictEqual(gameScoreDisplay(s), before, "bod zadaný během pauzy se neměl započítat");
+
+  resumeMatch(s);
+  assert.strictEqual(s.paused, false);
+  assert.strictEqual(s.pauses.length, 1);
+  assert.ok(s.pauses[0].endedAt, "pauza by měla mít zaznamenaný konec po resumeMatch");
+
+  addPoint(s, "A"); // teď už by se bod měl připsat
+  assert.notDeepStrictEqual(gameScoreDisplay(s), before);
+  console.log("Test 15 OK: přerušení hry blokuje body a jde ukončit");
+}
+
+// Test 16: skreč (retire) ukončí zápas ve prospěch soupeře
+{
+  const s = initialState("Petra", "Jana");
+  addPoint(s, "A");
+  addPoint(s, "A");
+  retireMatch(s, "B", "zranění kotníku"); // Jana (B) se vzdává
+  assert.strictEqual(s.matchWinner, "A", "vítězem má být soupeř toho, kdo se vzdal");
+  assert.strictEqual(s.retired, true);
+  assert.strictEqual(s.retiredPlayer, "B");
+  assert.strictEqual(s.retirementReason, "zranění kotníku");
+  assert.ok(s.endedAt, "konec zápasu se má zaznamenat i při skreči");
+
+  const beforeState = JSON.stringify(s);
+  addPoint(s, "B"); // po skreči se body ignorují jako po normálním konci
+  assert.strictEqual(JSON.stringify(s), beforeState);
+  console.log("Test 16 OK: skreč ukončí zápas ve prospěch soupeře a další body se ignorují");
+}
+
+// Test 17: skreč automaticky uzavře probíhající pauzu
+{
+  const s = initialState();
+  pauseMatch(s, "Ošetření");
+  retireMatch(s, "A");
+  assert.strictEqual(s.paused, false, "skreč má uzavřít otevřenou pauzu");
+  assert.ok(s.pauses[0].endedAt, "pauza měla dostat endedAt při skreči");
+  console.log("Test 17 OK: skreč automaticky uzavře probíhající pauzu");
 }
 
 console.log("\nVšechny testy prošly.");

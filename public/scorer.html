@@ -45,11 +45,16 @@
     </div>
 
     <div class="status-line" id="statusLine"></div>
+    <div class="paused-banner" id="pausedBanner" style="display:none"></div>
     <div class="winner-banner" id="winnerBanner" style="display:none"></div>
 
     <div class="controls" id="pointButtons">
       <button class="btn-point" id="btnA">Bod pro A</button>
       <button class="btn-point" id="btnB">Bod pro B</button>
+    </div>
+
+    <div class="row-secondary" id="resumeRow" style="display:none">
+      <button class="btn-secondary" id="btnResume" style="width:100%">▶️ Pokračovat ve hře</button>
     </div>
 
     <div class="reason-panel" id="reasonPanel" style="display:none">
@@ -73,9 +78,37 @@
       <button class="btn-secondary" id="reasonCancel">Zrušit</button>
     </div>
 
+    <div class="reason-panel" id="pausePanel" style="display:none">
+      <div class="reason-title">Přerušit hru – z jakého důvodu?</div>
+      <div class="reason-grid">
+        <button class="btn-reason" data-pause-reason="Déšť">🌧 Déšť</button>
+        <button class="btn-reason" data-pause-reason="Ošetření">🩹 Ošetření</button>
+        <button class="btn-reason" data-pause-reason="Tma">🌙 Tma</button>
+        <button class="btn-reason btn-reason-muted" data-pause-reason="Jiný důvod">Jiný důvod</button>
+      </div>
+      <input type="text" id="pauseReasonCustom" maxlength="120" placeholder="Vlastní důvod (nepovinné)" style="width:100%; margin-top:10px; padding:10px; border-radius:8px; border:1px solid #ccd4cb;" />
+      <button class="btn-secondary" id="pauseConfirmCustom" style="width:100%; margin-top:8px;">Přerušit s vlastním důvodem</button>
+      <button class="btn-secondary" id="pauseCancel" style="margin-top:8px;">Zrušit</button>
+    </div>
+
+    <div class="reason-panel" id="retirePanel" style="display:none">
+      <div class="reason-title">Kdo se vzdává / ukončuje zápas?</div>
+      <div class="reason-grid">
+        <button class="btn-reason" id="retireA">Vzdává se hráč A</button>
+        <button class="btn-reason" id="retireB">Vzdává se hráč B</button>
+      </div>
+      <input type="text" id="retireReasonCustom" maxlength="120" placeholder="Důvod (nepovinné, např. zranění)" style="width:100%; margin-top:10px; padding:10px; border-radius:8px; border:1px solid #ccd4cb;" />
+      <button class="btn-secondary" id="retireCancel" style="width:100%; margin-top:8px;">Zrušit</button>
+    </div>
+
     <div class="row-secondary">
       <button class="btn-secondary" id="btnUndo">↩ Zpět</button>
       <button class="btn-secondary btn-danger" id="btnReset">Reset zápasu</button>
+    </div>
+
+    <div class="row-secondary">
+      <button class="btn-secondary" id="btnOpenPause">⏸ Přerušit hru</button>
+      <button class="btn-secondary btn-danger" id="btnOpenRetire">🏳 Ukončit zápas (skreč)</button>
     </div>
 
     <div class="settings">
@@ -191,27 +224,55 @@ function render(payload) {
   const gameLabel = document.getElementById('gameLabel');
   const statusLine = document.getElementById('statusLine');
   const winnerBanner = document.getElementById('winnerBanner');
+  const pausedBanner = document.getElementById('pausedBanner');
+  const resumeRow = document.getElementById('resumeRow');
   const btnA = document.getElementById('btnA');
   const btnB = document.getElementById('btnB');
+  const btnOpenPause = document.getElementById('btnOpenPause');
+  const btnOpenRetire = document.getElementById('btnOpenRetire');
 
   if (state.matchWinner) {
     pointA.textContent = '-';
     pointB.textContent = '-';
     gameLabel.textContent = 'KONEC';
     statusLine.textContent = '';
+    pausedBanner.style.display = 'none';
+    resumeRow.style.display = 'none';
     const winnerName = state.matchWinner === 'A' ? state.playerA : state.playerB;
     winnerBanner.style.display = 'block';
-    winnerBanner.textContent = `🏆 Vítěz zápasu: ${winnerName}`;
+    winnerBanner.textContent = state.retired
+      ? `🏆 Vítěz zápasu: ${winnerName} (soupeř zápas ukončil${state.retirementReason ? ' – ' + state.retirementReason : ''})`
+      : `🏆 Vítěz zápasu: ${winnerName}`;
     btnA.disabled = true;
     btnB.disabled = true;
     document.getElementById('btnSwapServer').disabled = true;
+    btnOpenPause.disabled = true;
+    btnOpenRetire.disabled = true;
     closeReasonPanel();
+    closePausePanel();
+    closeRetirePanel();
     return;
   }
   winnerBanner.style.display = 'none';
-  btnA.disabled = false;
-  btnB.disabled = false;
-  document.getElementById('btnSwapServer').disabled = false;
+  btnOpenRetire.disabled = false;
+
+  if (state.paused) {
+    pausedBanner.style.display = 'block';
+    pausedBanner.textContent = `⏸ Hra přerušena${state.pauseReason ? ': ' + state.pauseReason : ''}`;
+    resumeRow.style.display = 'grid';
+    btnA.disabled = true;
+    btnB.disabled = true;
+    document.getElementById('btnSwapServer').disabled = true;
+    btnOpenPause.disabled = true;
+    closeReasonPanel();
+  } else {
+    pausedBanner.style.display = 'none';
+    resumeRow.style.display = 'none';
+    btnA.disabled = false;
+    btnB.disabled = false;
+    document.getElementById('btnSwapServer').disabled = false;
+    btnOpenPause.disabled = false;
+  }
 
   if (display.type === 'superTiebreak') {
     gameLabel.textContent = 'SUPER TIEBREAK';
@@ -255,7 +316,7 @@ function setServeNumber(n) {
 }
 
 function openReasonPanel(player) {
-  if (!lastState || lastState.matchWinner) return;
+  if (!lastState || lastState.matchWinner || lastState.paused) return;
   pendingPlayer = player;
   const name = player === 'A' ? lastState.playerA : lastState.playerB;
   reasonTitle.textContent = `Bod pro ${name} — jak byl vyhrán?`;
@@ -331,6 +392,65 @@ function sendFormat() {
 }
 document.getElementById('selectFormat').addEventListener('change', sendFormat);
 document.getElementById('checkboxSuperTB').addEventListener('change', sendFormat);
+
+// --- Přerušení hry ---
+const pausePanel = document.getElementById('pausePanel');
+
+function openPausePanel() {
+  if (!lastState || lastState.matchWinner || lastState.paused) return;
+  document.getElementById('pauseReasonCustom').value = '';
+  pointButtons.style.display = 'none';
+  pausePanel.style.display = 'block';
+}
+function closePausePanel() {
+  pausePanel.style.display = 'none';
+  if (lastState && !lastState.matchWinner && !lastState.paused) pointButtons.style.display = 'grid';
+}
+
+document.getElementById('btnOpenPause').addEventListener('click', openPausePanel);
+document.getElementById('pauseCancel').addEventListener('click', closePausePanel);
+
+pausePanel.querySelectorAll('[data-pause-reason]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    socket.emit('action', { type: 'pause', reason: btn.getAttribute('data-pause-reason') });
+    closePausePanel();
+  });
+});
+document.getElementById('pauseConfirmCustom').addEventListener('click', () => {
+  const reason = document.getElementById('pauseReasonCustom').value.trim() || 'Jiný důvod';
+  socket.emit('action', { type: 'pause', reason });
+  closePausePanel();
+});
+
+document.getElementById('btnResume').addEventListener('click', () => {
+  socket.emit('action', { type: 'resume' });
+});
+
+// --- Předčasné ukončení zápasu (skreč) ---
+const retirePanel = document.getElementById('retirePanel');
+
+function openRetirePanel() {
+  if (!lastState || lastState.matchWinner) return;
+  document.getElementById('retireReasonCustom').value = '';
+  pointButtons.style.display = 'none';
+  retirePanel.style.display = 'block';
+}
+function closeRetirePanel() {
+  retirePanel.style.display = 'none';
+  if (lastState && !lastState.matchWinner && !lastState.paused) pointButtons.style.display = 'grid';
+}
+
+document.getElementById('btnOpenRetire').addEventListener('click', openRetirePanel);
+document.getElementById('retireCancel').addEventListener('click', closeRetirePanel);
+
+function submitRetire(player) {
+  const reason = document.getElementById('retireReasonCustom').value.trim() || undefined;
+  if (!confirm('Opravdu předčasně ukončit zápas?')) return;
+  socket.emit('action', { type: 'retire', player, reason });
+  closeRetirePanel();
+}
+document.getElementById('retireA').addEventListener('click', () => submitRetire('A'));
+document.getElementById('retireB').addEventListener('click', () => submitRetire('B'));
 </script>
 </body>
 </html>

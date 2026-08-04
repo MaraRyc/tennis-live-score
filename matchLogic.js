@@ -42,6 +42,12 @@ function initialState(
     startedAt: null, // čas prvního bodu
     endedAt: null, // čas konce zápasu
     pointLog: [], // historie bodů: {t, winner, reason, server, serveNumber, setIndex, superTiebreak, opportunity, converted}
+    paused: false, // hra je právě přerušená (déšť, ošetření, ...)
+    pauseReason: null,
+    pauses: [], // historie přerušení: {reason, startedAt, endedAt}
+    retired: false, // zápas skončil předčasně vzdáním/skrečí
+    retiredPlayer: null, // kdo se vzdal (null pokud retired=false)
+    retirementReason: null,
   };
 }
 
@@ -170,8 +176,43 @@ function detectOpportunity(state, g) {
   return { type, player: leadingPlayer };
 }
 
+// Přeruší hru (déšť, ošetření, tma...). Dokud je hra přerušená, body se nedají zadávat.
+function pauseMatch(state, reason) {
+  if (state.matchWinner || state.paused) return state;
+  const cleanReason = typeof reason === "string" && reason.trim() ? reason.trim().slice(0, 120) : null;
+  state.paused = true;
+  state.pauseReason = cleanReason;
+  state.pauses.push({ reason: cleanReason, startedAt: Date.now(), endedAt: null });
+  return state;
+}
+
+// Ukončí aktuální přerušení a pokračuje ve hře.
+function resumeMatch(state) {
+  if (!state.paused) return state;
+  const last = state.pauses[state.pauses.length - 1];
+  if (last && last.endedAt == null) last.endedAt = Date.now();
+  state.paused = false;
+  state.pauseReason = null;
+  return state;
+}
+
+// Předčasné ukončení zápasu (skreč/vzdání). retiringPlayer je ten, kdo končí –
+// vítězem se stává automaticky ten druhý.
+function retireMatch(state, retiringPlayer, reason) {
+  if (state.matchWinner) return state;
+  if (retiringPlayer !== "A" && retiringPlayer !== "B") return state;
+  resumeMatch(state); // uzavře případné probíhající přerušení
+  const cleanReason = typeof reason === "string" && reason.trim() ? reason.trim().slice(0, 120) : null;
+  state.retired = true;
+  state.retiredPlayer = retiringPlayer;
+  state.retirementReason = cleanReason;
+  state.matchWinner = retiringPlayer === "A" ? "B" : "A";
+  state.endedAt = Date.now();
+  return state;
+}
+
 function addPoint(state, player, reason, serveNumber) {
-  if (state.matchWinner) return state; // zápas už skončil, ignorovat
+  if (state.matchWinner || state.paused) return state; // zápas skončil nebo je přerušený, ignorovat
   if (player !== "A" && player !== "B") return state;
 
   const normalizedReason = POINT_REASONS.includes(reason) ? reason : null;
@@ -324,11 +365,20 @@ function computeStats(state) {
 
   const durationMs = state.startedAt ? (state.endedAt || Date.now()) - state.startedAt : null;
 
+  const pausedMs = state.pauses.reduce((sum, p) => sum + ((p.endedAt || Date.now()) - p.startedAt), 0);
+
   return {
     stats,
     totalPoints: state.pointLog.length,
     durationMs,
     durationLabel: formatDuration(durationMs),
+    interruptions: state.pauses.map((p) => ({
+      reason: p.reason,
+      durationMs: (p.endedAt || Date.now()) - p.startedAt,
+      durationLabel: formatDuration((p.endedAt || Date.now()) - p.startedAt),
+      ongoing: p.endedAt == null,
+    })),
+    pausedMsTotal: pausedMs,
   };
 }
 
@@ -338,5 +388,8 @@ module.exports = {
   gameScoreDisplay,
   computeStats,
   formatDuration,
+  pauseMatch,
+  resumeMatch,
+  retireMatch,
   POINT_REASONS,
 };

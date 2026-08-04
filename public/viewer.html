@@ -41,6 +41,7 @@
 
     <div class="status-line" id="statusLine"></div>
     <div class="last-point-line" id="lastPointLine"></div>
+    <div class="paused-banner" id="pausedBanner" style="display:none"></div>
     <div class="winner-banner" id="winnerBanner" style="display:none"></div>
 
     <label class="checkbox-label" style="justify-content:center; margin-top:16px;">
@@ -161,17 +162,29 @@ function render(payload) {
     lastPointLine.textContent = '';
   }
 
+  const pausedBanner = document.getElementById('pausedBanner');
+
   if (state.matchWinner) {
     pointA.textContent = '-';
     pointB.textContent = '-';
     gameLabel.textContent = 'KONEC';
     statusLine.textContent = '';
+    pausedBanner.style.display = 'none';
     const winnerName = state.matchWinner === 'A' ? state.playerA : state.playerB;
     winnerBanner.style.display = 'block';
-    winnerBanner.textContent = `🏆 Vítěz zápasu: ${winnerName}`;
+    winnerBanner.textContent = state.retired
+      ? `🏆 Vítěz zápasu: ${winnerName} (soupeř zápas ukončil${state.retirementReason ? ' – ' + state.retirementReason : ''})`
+      : `🏆 Vítěz zápasu: ${winnerName}`;
     return;
   }
   winnerBanner.style.display = 'none';
+
+  if (state.paused) {
+    pausedBanner.style.display = 'block';
+    pausedBanner.textContent = `⏸ Hra přerušena${state.pauseReason ? ': ' + state.pauseReason : ''}`;
+  } else {
+    pausedBanner.style.display = 'none';
+  }
 
   if (display.type === 'superTiebreak') {
     gameLabel.textContent = 'SUPER TIEBREAK';

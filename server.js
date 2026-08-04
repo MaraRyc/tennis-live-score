@@ -8,7 +8,15 @@ const path = require("path");
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const { initialState, addPoint, gameScoreDisplay, computeStats } = require("./matchLogic");
+const {
+  initialState,
+  addPoint,
+  gameScoreDisplay,
+  computeStats,
+  pauseMatch,
+  resumeMatch,
+  retireMatch,
+} = require("./matchLogic");
 
 const app = express();
 const server = http.createServer(app);
@@ -47,7 +55,16 @@ function loadStateFromDisk(matchId) {
     const parsed = JSON.parse(raw);
     // Základní kontrola, že soubor obsahuje rozumný stav zápasu.
     if (parsed && typeof parsed === "object" && parsed.playerA && parsed.playerB) {
-      return parsed;
+      // Zpětná kompatibilita: zápas uložený starší verzí appky nemusí mít
+      // novější pole (paused, pauses, retired...). Doplníme je výchozími
+      // hodnotami, aby appka na starých datech nepadala.
+      const base = initialState(
+        parsed.playerA,
+        parsed.playerB,
+        parsed.setsToWin,
+        parsed.deciderSuperTiebreak
+      );
+      return { ...base, ...parsed };
     }
   } catch (err) {
     // Soubor neexistuje nebo je poškozený – začneme s čistým zápasem.
@@ -147,6 +164,22 @@ io.on("connection", (socket) => {
         if (match.state.matchWinner) return;
         pushHistory(match);
         match.state.server = action.player;
+        break;
+      }
+      case "pause": {
+        pushHistory(match);
+        pauseMatch(match.state, action.reason);
+        break;
+      }
+      case "resume": {
+        pushHistory(match);
+        resumeMatch(match.state);
+        break;
+      }
+      case "retire": {
+        if (action.player !== "A" && action.player !== "B") return;
+        pushHistory(match);
+        retireMatch(match.state, action.player, action.reason);
         break;
       }
       default:

@@ -28,6 +28,12 @@
       <span class="big" id="durationLabel">–</span>
     </div>
 
+    <p class="empty-note" id="retirementNote" style="display:none"></p>
+    <div id="interruptionsBox" style="display:none; margin-bottom:10px;">
+      <label>Přerušení hry</label>
+      <div id="interruptionsList" style="font-size:0.85rem; color:var(--muted); margin-top:4px;"></div>
+    </div>
+
     <table class="stats-table" id="statsTable">
       <thead>
         <tr>
@@ -146,6 +152,30 @@ function render(payload) {
   const anyReasonLogged = state.pointLog.some((p) => p.reason);
   const showNote = stats.totalPoints > 0 && !anyReasonLogged;
   document.getElementById('emptyNote').style.display = showNote ? 'block' : 'none';
+
+  const retirementNote = document.getElementById('retirementNote');
+  if (state.retired) {
+    const winnerName = state.matchWinner === 'A' ? state.playerA : state.playerB;
+    const loserName = state.retiredPlayer === 'A' ? state.playerA : state.playerB;
+    retirementNote.style.display = 'block';
+    retirementNote.textContent = `🏳 Zápas ukončen předčasně – ${loserName} se vzdal(a)${state.retirementReason ? ' (' + state.retirementReason + ')' : ''}. Vítěz: ${winnerName}.`;
+  } else {
+    retirementNote.style.display = 'none';
+  }
+
+  const interruptionsBox = document.getElementById('interruptionsBox');
+  const interruptionsList = document.getElementById('interruptionsList');
+  if (stats.interruptions && stats.interruptions.length) {
+    interruptionsBox.style.display = 'block';
+    interruptionsList.innerHTML = '';
+    stats.interruptions.forEach((p, i) => {
+      const line = document.createElement('div');
+      line.textContent = `${i + 1}. ${p.reason || 'bez uvedeného důvodu'} – ${p.durationLabel}${p.ongoing ? ' (probíhá)' : ''}`;
+      interruptionsList.appendChild(line);
+    });
+  } else {
+    interruptionsBox.style.display = 'none';
+  }
 }
 
 socket.on('state', render);
@@ -211,6 +241,16 @@ function buildFullReport(state, stats) {
   lines.push('');
   lines.push(`Délka zápasu: ${stats.durationLabel || 'neznámá (zápas ještě neběžel)'}`);
   lines.push(`Stav: ${state.matchWinner ? 'ukončeno, vítěz ' + (state.matchWinner === 'A' ? state.playerA : state.playerB) : 'probíhá'}`);
+  if (state.retired) {
+    const loserName = state.retiredPlayer === 'A' ? state.playerA : state.playerB;
+    lines.push(`Poznámka: zápas ukončen předčasně – ${loserName} se vzdal(a)${state.retirementReason ? ' (' + state.retirementReason + ')' : ''}.`);
+  }
+  if (stats.interruptions && stats.interruptions.length) {
+    lines.push('Přerušení hry:');
+    stats.interruptions.forEach((p, i) => {
+      lines.push(`  ${i + 1}. ${p.reason || 'bez uvedeného důvodu'} – ${p.durationLabel}${p.ongoing ? ' (probíhá)' : ''}`);
+    });
+  }
   lines.push('');
   lines.push('Sety:');
   state.sets.forEach((s, i) => {
@@ -242,7 +282,7 @@ function buildShortRecap(state, stats) {
     .map((s) => (s.superTiebreak ? `${s.a}-${s.b} (super TB)` : `${s.a}-${s.b}`))
     .join(', ');
   const resultLine = state.matchWinner
-    ? `Vítěz: ${state.matchWinner === 'A' ? state.playerA : state.playerB} 🏆`
+    ? `Vítěz: ${state.matchWinner === 'A' ? state.playerA : state.playerB} 🏆${state.retired ? ' (soupeř se vzdal)' : ''}`
     : 'Zápas právě probíhá';
   const durationLine = stats.durationLabel ? `Délka: ${stats.durationLabel}` : '';
   return [
