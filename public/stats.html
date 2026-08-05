@@ -49,7 +49,7 @@
         <tr><td>Přímý bod z podání</td><td id="swA">0</td><td id="swB">0</td></tr>
         <tr><td>Vynucené chyby</td><td id="feA">0</td><td id="feB">0</td></tr>
         <tr><td>Nevynucené chyby</td><td id="ueA">0</td><td id="ueB">0</td></tr>
-        <tr><td>Dvojchyby soupeře</td><td id="dfA">0</td><td id="dfB">0</td></tr>
+        <tr><td>Dvojchyby</td><td id="dfA">0</td><td id="dfB">0</td></tr>
         <tr><td>Breakpointy (proměněné/celkem)</td><td id="bpA">0/0</td><td id="bpB">0/0</td></tr>
         <tr><td>Gamepointy (proměněné/celkem)</td><td id="gpA">0/0</td><td id="gpB">0/0</td></tr>
         <tr><td>1. servis (vyhráno, %)</td><td id="s1A">0/0</td><td id="s1B">0/0</td></tr>
@@ -62,12 +62,23 @@
       začne u bodů vybírat, jak byly vyhrané (winner / eso / chyba…).
     </p>
 
+    <div id="shotBreakdownBox" style="display:none; margin-top:18px;">
+      <label>Rozpad podle typu úderu</label>
+      <div id="shotBreakdownTables"></div>
+    </div>
+
+    <div id="momentumBox" style="display:none; margin-top:18px;">
+      <label>Vývoj zápasu</label>
+      <p class="empty-note" style="padding:2px 0 6px;">Nad čárou = náskok v bodech pro <span id="momentumLegendA"></span>, pod čárou pro <span id="momentumLegendB"></span>.</p>
+      <canvas id="momentumChart" height="160"></canvas>
+    </div>
+
     <div class="download-row">
       <button id="btnShare">📤 Sdílet výsledek</button>
     </div>
     <div class="download-row">
       <button id="btnDownloadCsv">Stáhnout log bodů (CSV)</button>
-      <button id="btnDownloadTxt">Stáhnout shrnutí (TXT)</button>
+      <button id="btnDownloadPdf">📄 Stáhnout statistiky (PDF)</button>
     </div>
   </div>
 
@@ -78,6 +89,9 @@
 
 <script src="match-id.js"></script>
 <script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <script>
 applyMatchLinks();
 const matchId = getMatchId();
@@ -96,6 +110,115 @@ function formatServePct(serve) {
   if (!serve || serve.played === 0) return '0/0';
   const pct = Math.round((serve.won / serve.played) * 100);
   return `${serve.won}/${serve.played} (${pct} %)`;
+}
+
+const SHOT_TYPE_ORDER = [
+  'forehand', 'backhand', 'forehand_volley', 'backhand_volley',
+  'smash', 'dropshot', 'forehand_slice', 'backhand_slice',
+];
+const SHOT_TYPE_LABELS = {
+  forehand: 'Forhand',
+  backhand: 'Backhand',
+  forehand_volley: 'F-volej',
+  backhand_volley: 'B-volej',
+  smash: 'Smeč',
+  dropshot: 'Dropshot',
+  forehand_slice: 'F-slice',
+  backhand_slice: 'B-slice',
+};
+
+function buildShotTable(title, byShotA, byShotB, nameA, nameB) {
+  const rows = SHOT_TYPE_ORDER
+    .map((key) => ({ key, a: byShotA[key] || 0, b: byShotB[key] || 0 }))
+    .filter((r) => r.a > 0 || r.b > 0);
+  if (!rows.length) return null;
+
+  const table = document.createElement('table');
+  table.className = 'stats-table';
+  table.style.marginTop = '10px';
+  const thead = document.createElement('thead');
+  thead.innerHTML = `<tr><th>${title}</th><th>${nameA}</th><th>${nameB}</th></tr>`;
+  const tbody = document.createElement('tbody');
+  rows.forEach((r) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${SHOT_TYPE_LABELS[r.key]}</td><td>${r.a}</td><td>${r.b}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(thead);
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderShotBreakdown(state, stats) {
+  const box = document.getElementById('shotBreakdownBox');
+  const container = document.getElementById('shotBreakdownTables');
+  container.innerHTML = '';
+  const A = stats.stats.A, B = stats.stats.B;
+  const tables = [
+    buildShotTable('Winner podle úderu', A.winnersByShot, B.winnersByShot, state.playerA, state.playerB),
+    buildShotTable('Vynucená chyba podle úderu', A.forcedErrorsByShot, B.forcedErrorsByShot, state.playerA, state.playerB),
+    buildShotTable('Nevynucená chyba podle úderu', A.unforcedErrorsByShot, B.unforcedErrorsByShot, state.playerA, state.playerB),
+  ].filter(Boolean);
+  if (!tables.length) {
+    box.style.display = 'none';
+    return;
+  }
+  tables.forEach((t) => container.appendChild(t));
+  box.style.display = 'block';
+}
+
+let momentumChart = null;
+function renderMomentum(state, momentum) {
+  const box = document.getElementById('momentumBox');
+  if (!momentum || momentum.length < 2 || typeof Chart === 'undefined') {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'block';
+  document.getElementById('momentumLegendA').textContent = state.playerA;
+  document.getElementById('momentumLegendB').textContent = state.playerB;
+
+  const labels = momentum.map((m) => m.index);
+  const data = momentum.map((m) => m.diff);
+  const canvas = document.getElementById('momentumChart');
+
+  if (momentumChart) {
+    momentumChart.data.labels = labels;
+    momentumChart.data.datasets[0].data = data;
+    momentumChart.update('none');
+    return;
+  }
+
+  momentumChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderColor: '#2f7a3d',
+        borderWidth: 2,
+        pointRadius: 0,
+        segment: {
+          borderColor: (ctx) => (ctx.p0.parsed.y < 0 || ctx.p1.parsed.y < 0) ? '#b23b3b' : '#2f7a3d',
+        },
+        fill: {
+          target: { value: 0 },
+          above: 'rgba(47, 122, 61, 0.15)',
+          below: 'rgba(178, 59, 59, 0.15)',
+        },
+        tension: 0.15,
+      }],
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { title: { display: true, text: 'Bod v zápase' }, ticks: { maxTicksLimit: 8 } },
+        y: { title: { display: true, text: 'Náskok v bodech' } },
+      },
+    },
+  });
 }
 
 function render(payload) {
@@ -176,6 +299,9 @@ function render(payload) {
   } else {
     interruptionsBox.style.display = 'none';
   }
+
+  renderShotBreakdown(state, stats);
+  renderMomentum(state, payload.momentum);
 }
 
 socket.on('state', render);
@@ -198,7 +324,7 @@ const REASON_LABELS = {
   service_winner: 'Přímý bod z podání',
   forced_error: 'Vynucená chyba',
   unforced_error: 'Nevynucená chyba',
-  double_fault: 'Dvojchyba soupeře',
+  double_fault: 'Dvojchyba',
 };
 
 function csvEscape(value) {
@@ -234,47 +360,106 @@ document.getElementById('btnDownloadCsv').addEventListener('click', () => {
   triggerDownload('tenis-log-bodu.csv', csv, 'text/csv;charset=utf-8');
 });
 
-function buildFullReport(state, stats) {
-  const lines = [];
-  lines.push(`Statistiky zápasu: ${state.playerA} vs ${state.playerB}`);
-  lines.push('='.repeat(40));
-  lines.push('');
-  lines.push(`Délka zápasu: ${stats.durationLabel || 'neznámá (zápas ještě neběžel)'}`);
-  lines.push(`Stav: ${state.matchWinner ? 'ukončeno, vítěz ' + (state.matchWinner === 'A' ? state.playerA : state.playerB) : 'probíhá'}`);
+function buildPdfReport(state, stats) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const marginX = 14;
+  let y = 18;
+
+  doc.setFontSize(16);
+  doc.text(`Statistiky zápasu: ${state.playerA} vs ${state.playerB}`, marginX, y);
+  y += 8;
+
+  doc.setFontSize(10);
+  doc.setTextColor(90);
+  const statusText = state.matchWinner
+    ? `Ukončeno – vítěz ${state.matchWinner === 'A' ? state.playerA : state.playerB}`
+    : 'Zápas probíhá';
+  doc.text(`Délka zápasu: ${stats.durationLabel || 'neznámá'}    Stav: ${statusText}`, marginX, y);
+  y += 6;
+  doc.text(`Vygenerováno: ${new Date().toLocaleString('cs-CZ')}`, marginX, y);
+  y += 6;
+  doc.setTextColor(20);
+
   if (state.retired) {
     const loserName = state.retiredPlayer === 'A' ? state.playerA : state.playerB;
-    lines.push(`Poznámka: zápas ukončen předčasně – ${loserName} se vzdal(a)${state.retirementReason ? ' (' + state.retirementReason + ')' : ''}.`);
+    doc.setFontSize(9);
+    doc.text(`Poznámka: zápas ukončen předčasně – ${loserName} se vzdal(a)${state.retirementReason ? ' (' + state.retirementReason + ')' : ''}.`, marginX, y);
+    y += 6;
+    doc.setFontSize(10);
   }
-  if (stats.interruptions && stats.interruptions.length) {
-    lines.push('Přerušení hry:');
-    stats.interruptions.forEach((p, i) => {
-      lines.push(`  ${i + 1}. ${p.reason || 'bez uvedeného důvodu'} – ${p.durationLabel}${p.ongoing ? ' (probíhá)' : ''}`);
-    });
+
+  if (state.sets.length) {
+    const setsText = state.sets.map((s, i) => (s.superTiebreak ? `Super TB: ${s.a}-${s.b}` : `Set ${i + 1}: ${s.a}-${s.b}`)).join('   ');
+    doc.text(`Sety: ${setsText}`, marginX, y);
+    y += 8;
+  } else {
+    y += 4;
   }
-  lines.push('');
-  lines.push('Sety:');
-  state.sets.forEach((s, i) => {
-    lines.push(`  ${s.superTiebreak ? 'Super tiebreak' : 'Set ' + (i + 1)}: ${s.a}-${s.b}`);
-  });
-  lines.push('');
-  lines.push('Statistika bodů:');
+
   const A = stats.stats.A;
   const B = stats.stats.B;
-  const row = (label, a, b) => lines.push(`  ${label.padEnd(28)} ${state.playerA}: ${a}   ${state.playerB}: ${b}`);
-  row('Vyhrané body celkem', A.pointsWon, B.pointsWon);
-  row('Winnery', A.winners, B.winners);
-  row('Esa', A.aces, B.aces);
-  row('Přímý bod z podání', A.serviceWinners, B.serviceWinners);
-  row('Vynucené chyby', A.forcedErrors, B.forcedErrors);
-  row('Nevynucené chyby', A.unforcedErrors, B.unforcedErrors);
-  row('Dvojchyby soupeře', A.doubleFaults, B.doubleFaults);
-  row('Breakpointy (proměněné/celkem)', `${A.breakPointsWon}/${A.breakPointsChances}`, `${B.breakPointsWon}/${B.breakPointsChances}`);
-  row('Gamepointy (proměněné/celkem)', `${A.gamePointsWon}/${A.gamePointsChances}`, `${B.gamePointsWon}/${B.gamePointsChances}`);
-  row('1. servis (vyhráno/odehráno)', formatServePct(A.firstServe), formatServePct(B.firstServe));
-  row('2. servis (vyhráno/odehráno)', formatServePct(A.secondServe), formatServePct(B.secondServe));
-  lines.push('');
-  lines.push(`Celkem odehraných bodů: ${stats.totalPoints}`);
-  return lines.join('\n');
+  const mainRows = [
+    ['Vyhrané body celkem', A.pointsWon, B.pointsWon],
+    ['Winnery', A.winners, B.winners],
+    ['Esa', A.aces, B.aces],
+    ['Přímý bod z podání', A.serviceWinners, B.serviceWinners],
+    ['Vynucené chyby', A.forcedErrors, B.forcedErrors],
+    ['Nevynucené chyby', A.unforcedErrors, B.unforcedErrors],
+    ['Dvojchyby', A.doubleFaults, B.doubleFaults],
+    ['Breakpointy (proměněné/celkem)', `${A.breakPointsWon}/${A.breakPointsChances}`, `${B.breakPointsWon}/${B.breakPointsChances}`],
+    ['Gamepointy (proměněné/celkem)', `${A.gamePointsWon}/${A.gamePointsChances}`, `${B.gamePointsWon}/${B.gamePointsChances}`],
+    ['1. servis (vyhráno)', formatServePct(A.firstServe), formatServePct(B.firstServe)],
+    ['2. servis (vyhráno)', formatServePct(A.secondServe), formatServePct(B.secondServe)],
+  ];
+  doc.autoTable({
+    startY: y,
+    head: [['Statistika', state.playerA, state.playerB]],
+    body: mainRows,
+    styles: { fontSize: 9 },
+    headStyles: { fillColor: [47, 122, 61] },
+    margin: { left: marginX, right: marginX },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  const shotTables = [
+    ['Winner podle úderu', A.winnersByShot, B.winnersByShot],
+    ['Vynucená chyba podle úderu', A.forcedErrorsByShot, B.forcedErrorsByShot],
+    ['Nevynucená chyba podle úderu', A.unforcedErrorsByShot, B.unforcedErrorsByShot],
+  ];
+  shotTables.forEach(([title, byShotA, byShotB]) => {
+    const rows = SHOT_TYPE_ORDER
+      .map((key) => [SHOT_TYPE_LABELS[key], byShotA[key] || 0, byShotB[key] || 0])
+      .filter((r) => r[1] > 0 || r[2] > 0);
+    if (!rows.length) return;
+    if (y > 260) { doc.addPage(); y = 18; }
+    doc.autoTable({
+      startY: y,
+      head: [[title, state.playerA, state.playerB]],
+      body: rows,
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [90, 90, 90] },
+      margin: { left: marginX, right: marginX },
+    });
+    y = doc.lastAutoTable.finalY + 8;
+  });
+
+  if (momentumChart) {
+    if (y > 190) { doc.addPage(); y = 18; }
+    doc.setFontSize(11);
+    doc.text('Vývoj zápasu', marginX, y);
+    y += 4;
+    const img = momentumChart.toBase64Image();
+    const pageWidth = doc.internal.pageSize.getWidth() - marginX * 2;
+    doc.addImage(img, 'PNG', marginX, y, pageWidth, pageWidth * 0.4);
+    y += pageWidth * 0.4 + 6;
+  }
+
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text(`Celkem odehraných bodů: ${stats.totalPoints}`, marginX, y);
+
+  doc.save('tenis-statistiky.pdf');
 }
 
 function buildShortRecap(state, stats) {
@@ -293,10 +478,14 @@ function buildShortRecap(state, stats) {
   ].filter(Boolean).join('\n');
 }
 
-document.getElementById('btnDownloadTxt').addEventListener('click', () => {
+document.getElementById('btnDownloadPdf').addEventListener('click', () => {
   if (!lastPayload) return;
+  if (typeof window.jspdf === 'undefined') {
+    alert('PDF knihovna se nenačetla (zkontrolujte připojení k internetu) – zkuste to prosím znovu.');
+    return;
+  }
   const { state, stats } = lastPayload;
-  triggerDownload('tenis-shrnuti.txt', buildFullReport(state, stats), 'text/plain;charset=utf-8');
+  buildPdfReport(state, stats);
 });
 
 document.getElementById('btnShare').addEventListener('click', async () => {

@@ -13,6 +13,7 @@ const {
   addPoint,
   gameScoreDisplay,
   computeStats,
+  computeMomentum,
   pauseMatch,
   resumeMatch,
   retireMatch,
@@ -94,6 +95,7 @@ function payloadFor(match) {
     state: match.state,
     display: gameScoreDisplay(match.state),
     stats: computeStats(match.state),
+    momentum: computeMomentum(match.state),
   };
 }
 
@@ -118,7 +120,7 @@ io.on("connection", (socket) => {
       case "point": {
         if (action.player !== "A" && action.player !== "B") return;
         pushHistory(match);
-        addPoint(match.state, action.player, action.reason, action.serveNumber);
+        addPoint(match.state, action.player, action.reason, action.serveNumber, action.shotType);
         break;
       }
       case "undo": {

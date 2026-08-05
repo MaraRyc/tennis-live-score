@@ -4,6 +4,7 @@ const {
   addPoint,
   gameScoreDisplay,
   computeStats,
+  computeMomentum,
   pauseMatch,
   resumeMatch,
   retireMatch,
@@ -294,6 +295,39 @@ function play(state, seq) {
   assert.strictEqual(s.paused, false, "skreč má uzavřít otevřenou pauzu");
   assert.ok(s.pauses[0].endedAt, "pauza měla dostat endedAt při skreči");
   console.log("Test 17 OK: skreč automaticky uzavře probíhající pauzu");
+}
+
+// Test 18: typ úderu se ukládá jen u winner/vynucená/nevynucená chyba a agreguje se do statistik
+{
+  const s = initialState("Petra", "Jana");
+  addPoint(s, "A", "winner", 1, "forehand");
+  addPoint(s, "A", "winner", 1, "forehand"); // druhý forhandový winner
+  addPoint(s, "B", "unforced_error", 1, "backhand_slice"); // chyba A z backhand slice -> počítá se A
+  addPoint(s, "A", "ace", 1, "forehand"); // eso: typ úderu se má ignorovat (eso není v SHOT_TYPE_REASONS)
+  addPoint(s, "B", "forced_error", 1, "nesmyslny_typ"); // neplatný typ úderu se má ignorovat (uloží se null)
+
+  assert.strictEqual(s.pointLog[0].shotType, "forehand");
+  assert.strictEqual(s.pointLog[3].shotType, null, "u esa se typ úderu nemá ukládat");
+  assert.strictEqual(s.pointLog[4].shotType, null, "neplatný typ úderu se má ignorovat");
+
+  const { stats } = computeStats(s);
+  assert.strictEqual(stats.A.winnersByShot.forehand, 2, "dva forhandové winnery hráče A");
+  assert.strictEqual(stats.A.unforcedErrorsByShot.backhand_slice, 1, "nevynucená chyba B se počítá hráči, který chyboval (A) podle úderu");
+  assert.strictEqual(Object.keys(stats.B.forcedErrorsByShot).length, 0, "chyba s neplatným typem úderu se nemá zapsat do rozpadu");
+  console.log("Test 18 OK: kategorizace typu úderu (winner/chyby) a jeho agregace do statistik");
+}
+
+// Test 19: graf vývoje zápasu (momentum) - kumulativní rozdíl bodů A minus B
+{
+  const s = initialState();
+  addPoint(s, "A"); // +1 -> diff 1
+  addPoint(s, "A"); // +1 -> diff 2
+  addPoint(s, "B"); // -1 -> diff 1
+  const momentum = computeMomentum(s);
+  assert.strictEqual(momentum.length, 3);
+  assert.deepStrictEqual(momentum.map((m) => m.diff), [1, 2, 1]);
+  assert.deepStrictEqual(momentum.map((m) => m.index), [1, 2, 3]);
+  console.log("Test 19 OK: graf vývoje zápasu (kumulativní náskok v bodech) se počítá správně");
 }
 
 console.log("\nVšechny testy prošly.");

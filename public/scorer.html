@@ -72,10 +72,26 @@
         <button class="btn-reason" data-reason="service_winner" id="reasonServiceWinner">Přímý bod z podání</button>
         <button class="btn-reason" data-reason="forced_error">Vynucená chyba</button>
         <button class="btn-reason" data-reason="unforced_error">Nevynucená chyba</button>
-        <button class="btn-reason" data-reason="double_fault" id="reasonDF">Dvojchyba soupeře</button>
+        <button class="btn-reason" data-reason="double_fault" id="reasonDF">Dvojchyba</button>
         <button class="btn-reason btn-reason-muted" data-reason="">Bez upřesnění</button>
       </div>
       <button class="btn-secondary" id="reasonCancel">Zrušit</button>
+    </div>
+
+    <div class="reason-panel" id="shotTypePanel" style="display:none">
+      <div class="reason-title" id="shotTypeTitle">Z jakého úderu?</div>
+      <div class="reason-grid">
+        <button class="btn-reason" data-shot="forehand">Forhand</button>
+        <button class="btn-reason" data-shot="backhand">Backhand</button>
+        <button class="btn-reason" data-shot="forehand_volley">F-volej</button>
+        <button class="btn-reason" data-shot="backhand_volley">B-volej</button>
+        <button class="btn-reason" data-shot="smash">Smeč</button>
+        <button class="btn-reason" data-shot="dropshot">Dropshot</button>
+        <button class="btn-reason" data-shot="forehand_slice">F-slice</button>
+        <button class="btn-reason" data-shot="backhand_slice">B-slice</button>
+        <button class="btn-reason btn-reason-muted" data-shot="">Bez upřesnění úderu</button>
+      </div>
+      <button class="btn-secondary" id="shotTypeBack">← Zpět</button>
     </div>
 
     <div class="reason-panel" id="pausePanel" style="display:none">
@@ -307,7 +323,10 @@ socket.on('state', render);
 const pointButtons = document.getElementById('pointButtons');
 const reasonPanel = document.getElementById('reasonPanel');
 const reasonTitle = document.getElementById('reasonTitle');
+const shotTypePanel = document.getElementById('shotTypePanel');
+const SHOT_TYPE_REASONS = ['winner', 'forced_error', 'unforced_error'];
 let selectedServeNumber = 1;
+let pendingReason = null;
 
 function setServeNumber(n) {
   selectedServeNumber = n;
@@ -335,22 +354,58 @@ function openReasonPanel(player) {
 
 function closeReasonPanel() {
   pendingPlayer = null;
+  pendingReason = null;
   reasonPanel.style.display = 'none';
+  shotTypePanel.style.display = 'none';
   pointButtons.style.display = 'grid';
+}
+
+function openShotTypePanel(reason) {
+  pendingReason = reason;
+  const name = pendingPlayer === 'A' ? lastState.playerA : lastState.playerB;
+  document.getElementById('shotTypeTitle').textContent = `${name} — z jakého úderu?`;
+  reasonPanel.style.display = 'none';
+  shotTypePanel.style.display = 'block';
 }
 
 document.getElementById('btnA').addEventListener('click', () => openReasonPanel('A'));
 document.getElementById('btnB').addEventListener('click', () => openReasonPanel('B'));
 document.getElementById('reasonCancel').addEventListener('click', closeReasonPanel);
+document.getElementById('shotTypeBack').addEventListener('click', () => {
+  pendingReason = null;
+  shotTypePanel.style.display = 'none';
+  reasonPanel.style.display = 'block';
+});
 
 document.getElementById('serveNum1').addEventListener('click', () => setServeNumber(1));
 document.getElementById('serveNum2').addEventListener('click', () => setServeNumber(2));
 
-document.querySelectorAll('.btn-reason').forEach((btn) => {
+document.querySelectorAll('#reasonPanel .btn-reason').forEach((btn) => {
   btn.addEventListener('click', () => {
     if (!pendingPlayer) return;
     const reason = btn.getAttribute('data-reason') || undefined;
+    // Winner / vynucená / nevynucená chyba: nejdřív se ještě zeptáme na typ úderu.
+    if (SHOT_TYPE_REASONS.includes(reason)) {
+      openShotTypePanel(reason);
+      return;
+    }
     socket.emit('action', { type: 'point', player: pendingPlayer, reason, serveNumber: selectedServeNumber });
+    playPointFeedback();
+    closeReasonPanel();
+  });
+});
+
+document.querySelectorAll('#shotTypePanel .btn-reason').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (!pendingPlayer || !pendingReason) return;
+    const shotType = btn.getAttribute('data-shot') || undefined;
+    socket.emit('action', {
+      type: 'point',
+      player: pendingPlayer,
+      reason: pendingReason,
+      serveNumber: selectedServeNumber,
+      shotType,
+    });
     playPointFeedback();
     closeReasonPanel();
   });

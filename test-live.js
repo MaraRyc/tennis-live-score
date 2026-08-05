@@ -154,6 +154,27 @@ async function main() {
   console.log("Test 'přímý bod z podání' + servisní statistiky OK.");
   console.log("Test ručního přehození podávajícího OK.");
 
+  // test typu úderu (shotType) u winneru/chyby a promítnutí do stats + momentum payloadu
+  scorer.emit("action", { type: "reset" });
+  await wait(150);
+  scorer.emit("action", { type: "point", player: "A", reason: "winner", serveNumber: 1, shotType: "forehand" });
+  scorer.emit("action", { type: "point", player: "B", reason: "unforced_error", serveNumber: 1, shotType: "backhand_slice" });
+  await wait(250);
+  const afterShotType = viewerStates[viewerStates.length - 1];
+  if (afterShotType.state.lastPointShotType !== "backhand_slice") {
+    throw new Error("Typ úderu posledního bodu se nepropsal do stavu");
+  }
+  if (afterShotType.stats.stats.A.winnersByShot.forehand !== 1) {
+    throw new Error("Rozpad winnerů podle úderu se nespočítal, dostal jsem " + JSON.stringify(afterShotType.stats.stats.A.winnersByShot));
+  }
+  if (!afterShotType.stats.stats.A.unforcedErrorsByShot || afterShotType.stats.stats.A.unforcedErrorsByShot.backhand_slice !== 1) {
+    throw new Error("Rozpad nevynucených chyb podle úderu se nespočítal, dostal jsem " + JSON.stringify(afterShotType.stats.stats.A.unforcedErrorsByShot));
+  }
+  if (!Array.isArray(afterShotType.momentum) || afterShotType.momentum.length !== 2) {
+    throw new Error("Payload nemá pole 'momentum' pro graf vývoje zápasu, dostal jsem " + JSON.stringify(afterShotType.momentum));
+  }
+  console.log("Test typu úderu (shotType) a grafu vývoje zápasu (momentum) OK.");
+
   // test přerušení hry: body se během pauzy nemají počítat, po pokračování zase ano
   scorer.emit("action", { type: "reset" });
   await wait(150);

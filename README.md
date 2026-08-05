@@ -13,7 +13,8 @@ a instalaci jako appku na plochu telefonu.
 - `public/index.html` – úvodní stránka: vytvoření nového zápasu, otevření podle kódu.
 - `public/scorer.html` – ovládací panel pro zadávání bodů (včetně výběru, jak byl bod vyhrán).
 - `public/viewer.html` – stránka pro diváky, jen ke čtení, aktualizuje se sama.
-- `public/stats.html` – statistiky zápasu (délka, winnery, esa, chyby), stažení CSV/TXT, sdílení výsledku.
+- `public/stats.html` – statistiky zápasu (délka, winnery, esa, chyby, rozpad podle úderu, graf
+  vývoje zápasu), stažení CSV / PDF, sdílení výsledku.
 - `public/match-id.js` – sdílená pomůcka pro práci s kódem zápasu v URL.
 - `public/manifest.json`, `public/icon.svg` – aby šla appka přidat na plochu telefonu (PWA).
 - `test-logic.js`, `test-live.js` – automatické testy (logika skóre + reálná websocket synchronizace).
@@ -30,14 +31,22 @@ Na scoreru je vidět, kdo zrovna podává (míček u jména), a jde to ručně p
 
 U každého bodu si scorer může (nepovinně) vybrat servis (1. nebo 2.) a jak byl bod vyhrán:
 Winner, Eso, Přímý bod z podání (soupeř se podání dotkl, ale nevrátil ho do hry), Vynucená chyba,
-Nevynucená chyba, Dvojchyba soupeře, nebo bez upřesnění. Eso a Přímý bod z podání jdou vybrat jen
-když daný hráč zrovna podává, Dvojchyba soupeře jen když podává ten druhý.
+Nevynucená chyba, Dvojchyba, nebo bez upřesnění. Eso a Přímý bod z podání jdou vybrat jen
+když daný hráč zrovna podává, Dvojchyba jen když podává ten druhý.
+
+U Winneru, Vynucené chyby a Nevynucené chyby appka navíc nabídne výběr typu úderu (Forhand,
+Backhand, F-volej, B-volej, Smeč, Dropshot, F-slice, B-slice) – volitelné, dá se přeskočit tlačítkem
+"Bez upřesnění úderu". Statistiky pak podle toho ukazují rozpad, kolik winnerů/chyb padlo z jakého
+úderu.
 
 Break pointy a game pointy (proměněné i nevyužité) appka sleduje automaticky podle skóre hry –
 scorer u nich nic nevybírá. Na stránce statistik se počítá délka zápasu, součty za oba hráče
-(včetně % bodů vyhraných po 1. a po 2. servisu), s možností stáhnout podrobný log bodů (CSV),
-textové shrnutí (TXT), nebo rovnou sdílet krátký výsledek (tlačítko Sdílet – použije nativní sdílení
-na mobilu, jinak zkopíruje text do schránky).
+(včetně % bodů vyhraných po 1. a po 2. servisu) a graf vývoje zápasu (kumulativní náskok v bodech,
+podobně jako eval graf na chess.com). Jde stáhnout podrobný log bodů (CSV) nebo kompletní statistiky
+i s grafem jako PDF, případně rovnou sdílet krátký výsledek (tlačítko Sdílet – použije nativní
+sdílení na mobilu, jinak zkopíruje text do schránky). Graf a PDF export používají knihovny
+Chart.js/jsPDF načtené z CDN, takže pro jejich vytvoření je potřeba mít při stahování statistik
+funkční internetové připojení (na běžný live přenos skóre to vliv nemá).
 
 ### Přerušení hry a předčasné ukončení (skreč)
 

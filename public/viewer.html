@@ -153,11 +153,22 @@ function render(payload) {
     service_winner: 'Přímý bod z podání',
     forced_error: 'Vynucená chyba',
     unforced_error: 'Nevynucená chyba',
-    double_fault: 'Dvojchyba soupeře',
+    double_fault: 'Dvojchyba',
+  };
+  const SHOT_TYPE_LABELS = {
+    forehand: 'forhand',
+    backhand: 'backhand',
+    forehand_volley: 'F-volej',
+    backhand_volley: 'B-volej',
+    smash: 'smeč',
+    dropshot: 'dropshot',
+    forehand_slice: 'F-slice',
+    backhand_slice: 'B-slice',
   };
   if (state.lastPointWinner && state.lastPointReason && REASON_LABELS[state.lastPointReason]) {
     const winnerName = state.lastPointWinner === 'A' ? state.playerA : state.playerB;
-    lastPointLine.textContent = `Poslední bod: ${REASON_LABELS[state.lastPointReason]} — ${winnerName}`;
+    const shotLabel = state.lastPointShotType && SHOT_TYPE_LABELS[state.lastPointShotType];
+    lastPointLine.textContent = `Poslední bod: ${REASON_LABELS[state.lastPointReason]}${shotLabel ? ' (' + shotLabel + ')' : ''} — ${winnerName}`;
   } else {
     lastPointLine.textContent = '';
   }

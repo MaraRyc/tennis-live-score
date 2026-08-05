@@ -10,6 +10,20 @@ const POINT_REASONS = [
   "double_fault",
 ];
 
+// Typ úderu se dá vybrat jen u winneru, vynucené a nevynucené chyby (u esa/přímého
+// bodu z podání/dvojchyby jde o servis, ne o standardní úder).
+const SHOT_TYPES = [
+  "forehand",
+  "backhand",
+  "forehand_volley",
+  "backhand_volley",
+  "smash",
+  "dropshot",
+  "forehand_slice",
+  "backhand_slice",
+];
+const SHOT_TYPE_REASONS = ["winner", "forced_error", "unforced_error"];
+
 function freshGame() {
   return { pA: 0, pB: 0 }; // syrové body ve hře (mimo tiebreak)
 }
@@ -39,6 +53,7 @@ function initialState(
     matchWinner: null, // null | 'A' | 'B'
     lastPointWinner: null,
     lastPointReason: null,
+    lastPointShotType: null,
     startedAt: null, // čas prvního bodu
     endedAt: null, // čas konce zápasu
     pointLog: [], // historie bodů: {t, winner, reason, server, serveNumber, setIndex, superTiebreak, opportunity, converted}
@@ -211,7 +226,7 @@ function retireMatch(state, retiringPlayer, reason) {
   return state;
 }
 
-function addPoint(state, player, reason, serveNumber) {
+function addPoint(state, player, reason, serveNumber, shotType) {
   if (state.matchWinner || state.paused) return state; // zápas skončil nebo je přerušený, ignorovat
   if (player !== "A" && player !== "B") return state;
 
@@ -219,11 +234,15 @@ function addPoint(state, player, reason, serveNumber) {
   // Dvojchyba je z definice o tom, že selhal i 2. servis – servisní číslo se
   // proto vždy vynutí na 2, ať scorer vybral cokoliv.
   const normalizedServeNumber = normalizedReason === "double_fault" ? 2 : serveNumber === 2 ? 2 : 1;
+  // Typ úderu dává smysl jen u winneru/vynucené/nevynucené chyby.
+  const normalizedShotType =
+    SHOT_TYPE_REASONS.includes(normalizedReason) && SHOT_TYPES.includes(shotType) ? shotType : null;
 
   if (!state.startedAt) state.startedAt = Date.now();
 
   state.lastPointWinner = player;
   state.lastPointReason = normalizedReason;
+  state.lastPointShotType = normalizedShotType;
 
   // Break/game point se sleduje jen v běžné hře (ne v tiebreaku) – musí se
   // spočítat PŘED přičtením tohoto bodu, protože zjišťujeme, jestli tenhle
@@ -236,6 +255,7 @@ function addPoint(state, player, reason, serveNumber) {
     t: Date.now(),
     winner: player,
     reason: normalizedReason,
+    shotType: normalizedShotType,
     server: state.server,
     serveNumber: normalizedServeNumber,
     setIndex: state.sets.length,
@@ -313,7 +333,16 @@ function freshPlayerStats() {
     gamePointsWon: 0,
     firstServe: { played: 0, won: 0 },
     secondServe: { played: 0, won: 0 },
+    // Rozpad podle typu úderu – klíč je hodnota ze SHOT_TYPES, hodnota počet výskytů.
+    winnersByShot: {},
+    forcedErrorsByShot: {},
+    unforcedErrorsByShot: {},
   };
+}
+
+function bumpShotCount(bucket, shotType) {
+  if (!shotType) return;
+  bucket[shotType] = (bucket[shotType] || 0) + 1;
 }
 
 // Spočítá agregované statistiky z point logu (winnery, esa, chyby, break/game pointy,
@@ -328,6 +357,7 @@ function computeStats(state) {
     switch (p.reason) {
       case "winner":
         stats[winner].winners += 1;
+        bumpShotCount(stats[winner].winnersByShot, p.shotType);
         break;
       case "ace":
         stats[winner].aces += 1;
@@ -337,9 +367,11 @@ function computeStats(state) {
         break;
       case "forced_error":
         stats[loser].forcedErrors += 1;
+        bumpShotCount(stats[loser].forcedErrorsByShot, p.shotType);
         break;
       case "unforced_error":
         stats[loser].unforcedErrors += 1;
+        bumpShotCount(stats[loser].unforcedErrorsByShot, p.shotType);
         break;
       case "double_fault":
         stats[loser].doubleFaults += 1;
@@ -382,14 +414,34 @@ function computeStats(state) {
   };
 }
 
+// Data pro graf vývoje zápasu (podobně jako eval graf na chess.com): pro každý
+// odehraný bod vrátí kumulativní rozdíl vyhraných bodů (A mínus B) a jestli tím
+// bodem skončil set, aby šly na grafu vyznačit hranice setů.
+function computeMomentum(state) {
+  let diff = 0;
+  return state.pointLog.map((p, i) => {
+    diff += p.winner === "A" ? 1 : -1;
+    const nextSetIndex = state.pointLog[i + 1] ? state.pointLog[i + 1].setIndex : p.setIndex;
+    return {
+      index: i + 1,
+      diff,
+      setIndex: p.setIndex,
+      setEnd: nextSetIndex !== p.setIndex,
+    };
+  });
+}
+
 module.exports = {
   initialState,
   addPoint,
   gameScoreDisplay,
   computeStats,
+  computeMomentum,
   formatDuration,
   pauseMatch,
   resumeMatch,
   retireMatch,
   POINT_REASONS,
+  SHOT_TYPES,
+  SHOT_TYPE_REASONS,
 };
