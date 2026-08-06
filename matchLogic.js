@@ -24,6 +24,20 @@ const SHOT_TYPES = [
 ];
 const SHOT_TYPE_REASONS = ["winner", "forced_error", "unforced_error"];
 
+// Sdílená normalizace kategorizace bodu – používá jak addPoint (nový bod), tak
+// editPointMeta (zpětná oprava už odehraného bodu), aby se pravidla nerozjížděla.
+function normalizeReason(reason) {
+  return POINT_REASONS.includes(reason) ? reason : null;
+}
+function normalizeShotType(normalizedReason, shotType) {
+  return SHOT_TYPE_REASONS.includes(normalizedReason) && SHOT_TYPES.includes(shotType) ? shotType : null;
+}
+function normalizeServeNumber(normalizedReason, serveNumber) {
+  // Dvojchyba je z definice o tom, že selhal i 2. servis – servisní číslo se
+  // proto vždy vynutí na 2, ať scorer vybral cokoliv.
+  return normalizedReason === "double_fault" ? 2 : serveNumber === 2 ? 2 : 1;
+}
+
 function freshGame() {
   return { pA: 0, pB: 0 }; // syrové body ve hře (mimo tiebreak)
 }
@@ -230,13 +244,9 @@ function addPoint(state, player, reason, serveNumber, shotType) {
   if (state.matchWinner || state.paused) return state; // zápas skončil nebo je přerušený, ignorovat
   if (player !== "A" && player !== "B") return state;
 
-  const normalizedReason = POINT_REASONS.includes(reason) ? reason : null;
-  // Dvojchyba je z definice o tom, že selhal i 2. servis – servisní číslo se
-  // proto vždy vynutí na 2, ať scorer vybral cokoliv.
-  const normalizedServeNumber = normalizedReason === "double_fault" ? 2 : serveNumber === 2 ? 2 : 1;
-  // Typ úderu dává smysl jen u winneru/vynucené/nevynucené chyby.
-  const normalizedShotType =
-    SHOT_TYPE_REASONS.includes(normalizedReason) && SHOT_TYPES.includes(shotType) ? shotType : null;
+  const normalizedReason = normalizeReason(reason);
+  const normalizedServeNumber = normalizeServeNumber(normalizedReason, serveNumber);
+  const normalizedShotType = normalizeShotType(normalizedReason, shotType);
 
   if (!state.startedAt) state.startedAt = Date.now();
 
@@ -303,6 +313,94 @@ function addPoint(state, player, reason, serveNumber, shotType) {
   }
 
   return state;
+}
+
+// Opraví zpětně kategorizaci (důvod / typ úderu / servisní číslo) u už odehraného bodu
+// v pointLogu podle jeho indexu. Nemění, kdo bod vyhrál, ani průběžné skóre hry/setu –
+// vítěz bodu a jeho pořadí zůstávají netknuté, mění se jen metadata použitá pro
+// statistiky. Díky tomu je oprava bezpečná i pro už dohraný zápas.
+function editPointMeta(state, index, updates) {
+  if (!Array.isArray(state.pointLog) || !Number.isInteger(index) || index < 0 || index >= state.pointLog.length) {
+    return state;
+  }
+  const p = state.pointLog[index];
+  const normalizedReason = normalizeReason(updates.reason);
+  p.reason = normalizedReason;
+  p.shotType = normalizeShotType(normalizedReason, updates.shotType);
+  p.serveNumber = normalizeServeNumber(normalizedReason, updates.serveNumber);
+
+  // Pokud jde o poslední odehraný bod, ať je "poslední bod" v hlavním stavu
+  // (viditelný na scoreru/viewer.html) v souladu s tím, co jsme právě opravili.
+  if (index === state.pointLog.length - 1) {
+    state.lastPointReason = normalizedReason;
+    state.lastPointShotType = p.shotType;
+  }
+  return state;
+}
+
+// Zpětná změna VÍTĚZE už odehraného bodu (scorer se spletl, kdo bod vyhrál).
+// Na rozdíl od editPointMeta se tohle nedá jen "opravit na místě" – kdo vyhraje
+// jednotlivé body ovlivňuje, kdy končí hry/sady/tiebreaky a tedy i střídání
+// podání pro všechny další body. Proto se celý zápas přehraje znovu od začátku
+// s opraveným vítězem u daného bodu (ostatní body i jejich metadata zůstávají).
+//
+// Pojistka: pokud by oprava způsobila, že zápas skončí dřív, než kolik bodů bylo
+// doopravdy odehráno (novější body by "zmizely"), appka opravu odmítne a vrátí
+// { applied: false, state: <původní nezměněný stav> } – bezpečnější než tiše
+// zahodit reálně odehrané body. Ruční přehození podávajícího (tlačítko "Vyměnit
+// podání") se v pointLogu nezaznamenává, takže takové korekce se při přehrání
+// nedají obnovit - u čerstvých bodů (viz omezení na posledních 10 v UI) je to
+// ale málo pravděpodobné.
+function editPointWinner(state, index, newWinner) {
+  if (!Array.isArray(state.pointLog) || index < 0 || index >= state.pointLog.length) {
+    return { applied: false, state };
+  }
+  if (newWinner !== "A" && newWinner !== "B") {
+    return { applied: false, state };
+  }
+  if (state.pointLog[index].winner === newWinner) {
+    return { applied: true, state }; // není co měnit
+  }
+
+  // U opraveného bodu se zároveň vynuluje důvod/typ úderu – ten se vázal na
+  // původního (špatného) vítěze a po přehození by dával nesmysl (např. "eso",
+  // které najednou "hraje" hráč, co ve skutečnosti nepodával).
+  const correctedLog = state.pointLog.map((p, i) =>
+    i === index ? { ...p, winner: newWinner, reason: null, shotType: null } : p
+  );
+
+  const fresh = initialState(state.playerA, state.playerB, state.setsToWin, state.deciderSuperTiebreak);
+  for (const p of correctedLog) {
+    addPoint(fresh, p.winner, p.reason, p.serveNumber, p.shotType);
+  }
+
+  if (fresh.pointLog.length !== correctedLog.length) {
+    // zápas by touhle opravou skončil dřív, než kolik bodů bylo odehráno -> odmítnout
+    return { applied: false, state };
+  }
+
+  // zachovat původní časy bodů (jinak by "přehráním" appka tvářila, že se všechny
+  // odehrály najednou, což by rozbilo délku zápasu i graf vývoje)
+  fresh.pointLog.forEach((p, i) => { p.t = correctedLog[i].t; });
+  fresh.startedAt = correctedLog[0].t;
+
+  // pauzy appka z jednotlivých bodů odvodit neumí, přenesou se tak, jak byly
+  fresh.paused = state.paused;
+  fresh.pauseReason = state.pauseReason;
+  fresh.pauses = state.pauses;
+
+  if (state.retired) {
+    // zápas skončil skrečí, ne doehráním - to se ze samotných bodů nedá poznat,
+    // aplikuje se to navrch stejně jako předtím
+    retireMatch(fresh, state.retiredPlayer, state.retirementReason);
+  }
+
+  if (fresh.matchWinner && state.matchWinner === fresh.matchWinner) {
+    // výsledek zápasu zůstal stejný jako předtím -> zachovat původní čas konce
+    fresh.endedAt = state.endedAt;
+  }
+
+  return { applied: true, state: fresh };
 }
 
 function formatDuration(ms) {
@@ -434,6 +532,8 @@ function computeMomentum(state) {
 module.exports = {
   initialState,
   addPoint,
+  editPointMeta,
+  editPointWinner,
   gameScoreDisplay,
   computeStats,
   computeMomentum,

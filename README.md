@@ -48,6 +48,33 @@ sdílení na mobilu, jinak zkopíruje text do schránky). Graf a PDF export pou�
 Chart.js/jsPDF načtené z CDN, takže pro jejich vytvoření je potřeba mít při stahování statistik
 funkční internetové připojení (na běžný live přenos skóre to vliv nemá).
 
+### Náhled a oprava posledních bodů
+
+Na spodku `scorer.html` appka ukazuje posledních 10 odehraných bodů (kdo je vyhrál, jakým způsobem
+a případně z jakého úderu) a u každého tlačítko "✏️ Upravit". V editačním panelu jde opravit dvě
+věci:
+
+1. **Vítěz bodu** – tlačítko se jménem druhého hráče přepne bod na něj okamžitě (bez potvrzování,
+   je to myšlené jako rychlá oprava "spletl jsem si, kdo bod vyhrál"). Appka si díky tomu musí
+   celý průběh zápasu přepočítat od začátku (kdo vyhrává jednotlivé body ovlivňuje, kdy končí
+   hry/sady a střídání podání), takže se u opraveného bodu zároveň vynuluje vybraný důvod/úder
+   (dával by smysl jen pro původního vítěze). Pojistka: pokud by taková oprava způsobila, že zápas
+   skončí dřív, než kolik bodů bylo doopravdy odehráno (novější body by "zmizely"), appka to
+   odmítne a scorerovi to napíše – spolehlivě to funguje jen u nedávných bodů, což odpovídá tomu,
+   že se editují jen poslední odehrané body.
+2. **Důvod/typ úderu/servis** – běžná oprava kategorizace (viz níže), na tu se čeká na tlačítko
+   "Uložit opravu".
+
+### Záloha rozehraného zápasu na telefonu scorera
+
+Kromě ukládání na server appka po každé změně uloží kopii rozehraného zápasu i do prohlížeče
+telefonu, ze kterého se zadává skóre (`scorer.html`, přes `localStorage`). Slouží to jako pojistka
+pro dlouhé přerušení (třeba přes noc): pokud server mezitím usne/restartuje se a přijde o data (viz
+omezení free Renderu níže), appka si při dalším připojení všimne, že záloha na telefonu má víc
+odehraných bodů než server, a nabídne žlutým banerem obnovení zápasu přesně tam, kde skončil.
+Stačí potvrdit "Obnovit ze zálohy" a zápas i statistiky se vrátí do stavu z telefonu. Záloha se týká
+jen zařízení, na kterém se skóre zadává – diváci (`viewer.html`) žádnou zálohu nepotřebují.
+
 ### Přerušení hry a předčasné ukončení (skreč)
 
 Tlačítkem "⏸ Přerušit hru" scorer zápas pozastaví a vybere důvod (déšť, ošetření, tma, nebo vlastní
@@ -102,9 +129,11 @@ zápasu, kterou appka nově umí, **na free Renderu reálně nezabrání ztrát�
 pauze** – pomůže jen při běžném restartu procesu (např. pádu aplikace), ne při uspání kvůli
 neaktivitě.
 
-Pro hraní s kamarády, kde zápas typicky netrvá s pauzami déle než 15 minut, to nevadí. Pokud ale
-chcete mít jistotu, že appka nikdy neusne (např. u delšího turnaje s přestávkami), máte dvě reálné
-možnosti:
+Appka má proti tomu od teď pojistku navíc – zápas si zálohuje i do telefonu, ze kterého se skóre
+zadává (viz sekce "Záloha rozehraného zápasu na telefonu scorera" výše), takže i kdyby server
+usnutím o data přišel, appka to při dalším připojení pozná a nabídne obnovu ze zálohy. Pro jistotu
+ale pořád platí – pokud chcete mít jistotu, že appka nikdy neusne (např. u delšího turnaje s
+přestávkami, nebo aby to diváci mezitím mohli sledovat), máte dvě reálné možnosti:
 
 1. **Bezplatný "keep-alive" ping** – nastavte si na [cron-job.org](https://cron-job.org) nebo
    [UptimeRobot](https://uptimerobot.com) pravidelný požadavek na vaši adresu (např. každých

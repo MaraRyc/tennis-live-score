@@ -21,6 +21,14 @@
   </header>
 
   <div class="card">
+    <div class="restore-banner" id="restoreBanner" style="display:none">
+      <div id="restoreText"></div>
+      <div class="row-secondary">
+        <button class="btn-secondary" id="btnRestoreYes" style="background:var(--court); color:white;">✅ Obnovit ze zálohy</button>
+        <button class="btn-secondary" id="btnRestoreNo">Zahodit, nechat server</button>
+      </div>
+    </div>
+
     <div class="sets-row" id="setsRow"></div>
 
     <div class="scoreboard">
@@ -127,6 +135,58 @@
       <button class="btn-secondary btn-danger" id="btnOpenRetire">🏳 Ukončit zápas (skreč)</button>
     </div>
 
+    <div class="recent-points-box" id="recentPointsBox">
+      <label>Posledních 10 bodů (úprava neovlivní skóre, jen statistiky)</label>
+      <div id="recentPointsList"></div>
+    </div>
+
+    <div class="reason-panel" id="editPointPanel" style="display:none">
+      <div class="reason-title" id="editPointTitle">Upravit bod</div>
+
+      <div class="serve-number-row" id="editWinnerRow" style="margin-bottom:14px;">
+        <span>Vítěz bodu:</span>
+        <button class="btn-serve-num" id="editWinnerA">Hráč A</button>
+        <button class="btn-serve-num" id="editWinnerB">Hráč B</button>
+      </div>
+      <p class="empty-note" style="padding:0 0 12px; font-size:0.78rem;">Změna vítěze bodu se provede hned po kliknutí (přepočítá se celé skóre) a smaže u něj vybraný důvod/úder.</p>
+
+      <div class="reason-grid" id="editReasonGrid">
+        <button class="btn-reason" data-edit-reason="winner">Winner</button>
+        <button class="btn-reason" data-edit-reason="ace" id="editReasonAce">Eso</button>
+        <button class="btn-reason" data-edit-reason="service_winner" id="editReasonServiceWinner">Přímý bod z podání</button>
+        <button class="btn-reason" data-edit-reason="forced_error">Vynucená chyba</button>
+        <button class="btn-reason" data-edit-reason="unforced_error">Nevynucená chyba</button>
+        <button class="btn-reason" data-edit-reason="double_fault" id="editReasonDF">Dvojchyba</button>
+        <button class="btn-reason btn-reason-muted" data-edit-reason="">Bez upřesnění</button>
+      </div>
+
+      <div id="editShotTypeSection" style="display:none; margin-top:14px;">
+        <div class="serve-number-row" style="justify-content:center; margin-bottom:8px;"><span>Typ úderu:</span></div>
+        <div class="reason-grid" id="editShotGrid">
+          <button class="btn-reason" data-edit-shot="forehand">Forhand</button>
+          <button class="btn-reason" data-edit-shot="backhand">Backhand</button>
+          <button class="btn-reason" data-edit-shot="forehand_volley">F-volej</button>
+          <button class="btn-reason" data-edit-shot="backhand_volley">B-volej</button>
+          <button class="btn-reason" data-edit-shot="smash">Smeč</button>
+          <button class="btn-reason" data-edit-shot="dropshot">Dropshot</button>
+          <button class="btn-reason" data-edit-shot="forehand_slice">F-slice</button>
+          <button class="btn-reason" data-edit-shot="backhand_slice">B-slice</button>
+          <button class="btn-reason btn-reason-muted" data-edit-shot="">Bez upřesnění úderu</button>
+        </div>
+      </div>
+
+      <div class="serve-number-row" id="editServeNumberRow" style="margin-top:14px;">
+        <span>Servis:</span>
+        <button class="btn-serve-num" data-edit-serve="1" id="editServeNum1">1.</button>
+        <button class="btn-serve-num" data-edit-serve="2" id="editServeNum2">2.</button>
+      </div>
+
+      <div class="row-secondary" style="margin-top:14px;">
+        <button class="btn-secondary" id="editPointSave" style="background:var(--court); color:white;">Uložit opravu</button>
+        <button class="btn-secondary" id="editPointCancel">Zrušit</button>
+      </div>
+    </div>
+
     <div class="settings">
       <div class="settings-row">
         <div>
@@ -175,6 +235,56 @@ const badge = document.getElementById('connBadge');
 let lastState = null;
 let pendingPlayer = null;
 
+// --- Záloha zápasu na telefonu (localStorage) ---
+// Pojistka proti tomu, že server (např. na free Renderu po dlouhé pauze) ztratí
+// uložená data zápasu. Tenhle prohlížeč si po každé změně uloží kopii stavu
+// zápasu; pokud se při připojení ukáže, že server má míň bodů než tahle záloha,
+// nabídne se obnovení ze zálohy.
+const BACKUP_KEY = 'tennisBackup_' + (matchId || 'default');
+let restorePending = false;
+let firstStateReceived = false;
+
+function loadBackup() {
+  try {
+    const raw = localStorage.getItem(BACKUP_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function saveBackup(state) {
+  try {
+    localStorage.setItem(BACKUP_KEY, JSON.stringify({ state, savedAt: Date.now() }));
+  } catch (e) {
+    // localStorage nemusí být dostupné (např. soukromé prohlížení) – bez zálohy, appka jinak funguje normálně
+  }
+}
+
+const restoreBanner = document.getElementById('restoreBanner');
+
+function showRestoreBanner(backup, serverPayload) {
+  restorePending = true;
+  const backupLen = backup.state.pointLog.length;
+  const serverLen = serverPayload.state.pointLog.length;
+  const when = new Date(backup.savedAt).toLocaleString('cs-CZ');
+  document.getElementById('restoreText').textContent =
+    `⚠️ Na tomto telefonu je uložená rozehranější záloha zápasu (${backupLen} odehraných bodů, naposledy uloženo ${when}), ` +
+    `ale server teď hlásí jen ${serverLen} bodů – asi usnul nebo se restartoval a ztratil rozehraný zápas. Chcete zápas obnovit ze zálohy z telefonu?`;
+  restoreBanner.style.display = 'block';
+
+  document.getElementById('btnRestoreYes').onclick = () => {
+    socket.emit('action', { type: 'restoreState', state: backup.state });
+    restorePending = false;
+    restoreBanner.style.display = 'none';
+  };
+  document.getElementById('btnRestoreNo').onclick = () => {
+    restorePending = false;
+    restoreBanner.style.display = 'none';
+    saveBackup(serverPayload.state); // respektujeme rozhodnutí, záloha se přepíše aktuálním stavem serveru
+  };
+}
+
 let audioCtx = null;
 function playPointFeedback() {
   if (!document.getElementById('checkboxSound').checked) return;
@@ -199,6 +309,7 @@ socket.on('disconnect', () => { badge.textContent = 'odpojeno'; badge.classList.
 function render(payload) {
   const { state, display } = payload;
   lastState = state;
+  renderRecentPoints(state);
 
   document.getElementById('nameA').childNodes[0].textContent = state.playerA + ' ';
   document.getElementById('nameB').lastChild.textContent = ' ' + state.playerB;
@@ -267,6 +378,7 @@ function render(payload) {
     closeReasonPanel();
     closePausePanel();
     closeRetirePanel();
+    closeEditPoint();
     return;
   }
   winnerBanner.style.display = 'none';
@@ -318,7 +430,25 @@ function render(payload) {
   }
 }
 
-socket.on('state', render);
+socket.on('state', (payload) => {
+  render(payload);
+
+  if (!firstStateReceived) {
+    firstStateReceived = true;
+    const backup = loadBackup();
+    if (backup && backup.state && Array.isArray(backup.state.pointLog)) {
+      const backupLen = backup.state.pointLog.length;
+      const serverLen = payload.state.pointLog.length;
+      // Server má míň bodů než záloha na telefonu a zápas na serveru ještě neskončil
+      // (jinak by šlo jen o normální dohraný starší zápas) -> pravděpodobná ztráta dat.
+      if (backupLen > serverLen && !payload.state.matchWinner) {
+        showRestoreBanner(backup, payload);
+      }
+    }
+  }
+
+  if (!restorePending) saveBackup(payload.state);
+});
 
 const pointButtons = document.getElementById('pointButtons');
 const reasonPanel = document.getElementById('reasonPanel');
@@ -336,6 +466,7 @@ function setServeNumber(n) {
 
 function openReasonPanel(player) {
   if (!lastState || lastState.matchWinner || lastState.paused) return;
+  closeEditPoint();
   pendingPlayer = player;
   const name = player === 'A' ? lastState.playerA : lastState.playerB;
   reasonTitle.textContent = `Bod pro ${name} — jak byl vyhrán?`;
@@ -453,6 +584,7 @@ const pausePanel = document.getElementById('pausePanel');
 
 function openPausePanel() {
   if (!lastState || lastState.matchWinner || lastState.paused) return;
+  closeEditPoint();
   document.getElementById('pauseReasonCustom').value = '';
   pointButtons.style.display = 'none';
   pausePanel.style.display = 'block';
@@ -486,6 +618,7 @@ const retirePanel = document.getElementById('retirePanel');
 
 function openRetirePanel() {
   if (!lastState || lastState.matchWinner) return;
+  closeEditPoint();
   document.getElementById('retireReasonCustom').value = '';
   pointButtons.style.display = 'none';
   retirePanel.style.display = 'block';
@@ -506,6 +639,181 @@ function submitRetire(player) {
 }
 document.getElementById('retireA').addEventListener('click', () => submitRetire('A'));
 document.getElementById('retireB').addEventListener('click', () => submitRetire('B'));
+
+// --- Posledních 10 bodů: náhled a zpětná úprava kategorizace ---
+const REASON_LABELS = {
+  winner: 'Winner',
+  ace: 'Eso',
+  service_winner: 'Přímý bod z podání',
+  forced_error: 'Vynucená chyba',
+  unforced_error: 'Nevynucená chyba',
+  double_fault: 'Dvojchyba',
+};
+const SHOT_TYPE_LABELS = {
+  forehand: 'Forhand',
+  backhand: 'Backhand',
+  forehand_volley: 'F-volej',
+  backhand_volley: 'B-volej',
+  smash: 'Smeč',
+  dropshot: 'Dropshot',
+  forehand_slice: 'F-slice',
+  backhand_slice: 'B-slice',
+};
+
+function renderRecentPoints(state) {
+  const box = document.getElementById('recentPointsList');
+  if (!box) return;
+  const log = state.pointLog || [];
+  if (!log.length) {
+    box.innerHTML = '<p class="empty-note" style="padding:6px 0;">Zatím žádné odehrané body.</p>';
+    return;
+  }
+  const start = Math.max(0, log.length - 10);
+  box.innerHTML = '';
+  for (let i = log.length - 1; i >= start; i--) {
+    const p = log[i];
+    const winnerName = p.winner === 'A' ? state.playerA : state.playerB;
+    const reasonLabel = p.reason ? (REASON_LABELS[p.reason] || p.reason) : 'bez upřesnění';
+    const shotLabel = p.shotType ? ' · ' + (SHOT_TYPE_LABELS[p.shotType] || p.shotType) : '';
+    const row = document.createElement('div');
+    row.className = 'recent-point-row';
+    const text = document.createElement('span');
+    text.className = 'recent-point-text';
+    text.textContent = `#${i + 1} — ${winnerName}: ${reasonLabel}${shotLabel}`;
+    const btn = document.createElement('button');
+    btn.className = 'btn-edit-point';
+    btn.textContent = '✏️ Upravit';
+    btn.addEventListener('click', () => openEditPoint(i));
+    row.appendChild(text);
+    row.appendChild(btn);
+    box.appendChild(row);
+  }
+}
+
+const editPointPanel = document.getElementById('editPointPanel');
+let editingIndex = null;
+let editSelectedReason = '';
+let editSelectedShotType = '';
+let editSelectedServeNumber = 1;
+
+function updateEditReasonButtons() {
+  document.querySelectorAll('#editReasonGrid .btn-reason').forEach((btn) => {
+    btn.style.outline = (btn.getAttribute('data-edit-reason') || '') === editSelectedReason ? '3px solid var(--ink)' : 'none';
+  });
+}
+function updateEditShotButtons() {
+  document.querySelectorAll('#editShotGrid .btn-reason').forEach((btn) => {
+    btn.style.outline = (btn.getAttribute('data-edit-shot') || '') === editSelectedShotType ? '3px solid var(--ink)' : 'none';
+  });
+}
+function updateEditServeButtons() {
+  document.getElementById('editServeNum1').classList.toggle('active', editSelectedServeNumber === 1);
+  document.getElementById('editServeNum2').classList.toggle('active', editSelectedServeNumber === 2);
+}
+function updateEditShotVisibility() {
+  document.getElementById('editShotTypeSection').style.display = SHOT_TYPE_REASONS.includes(editSelectedReason) ? 'block' : 'none';
+}
+
+function openEditPoint(i) {
+  if (!lastState || !lastState.pointLog || !lastState.pointLog[i]) return;
+  const p = lastState.pointLog[i];
+  editingIndex = i;
+  editSelectedReason = p.reason || '';
+  editSelectedShotType = p.shotType || '';
+  editSelectedServeNumber = p.serveNumber === 2 ? 2 : 1;
+
+  const winnerName = p.winner === 'A' ? lastState.playerA : lastState.playerB;
+  document.getElementById('editPointTitle').textContent = `Upravit bod #${i + 1} (vyhrál ${winnerName})`;
+
+  const editWinnerA = document.getElementById('editWinnerA');
+  const editWinnerB = document.getElementById('editWinnerB');
+  editWinnerA.textContent = lastState.playerA;
+  editWinnerB.textContent = lastState.playerB;
+  editWinnerA.classList.toggle('active', p.winner === 'A');
+  editWinnerB.classList.toggle('active', p.winner === 'B');
+
+  // Eso a přímý bod z podání dávají smysl jen když ten, kdo bod vyhrál, zrovna
+  // podával; dvojchyba naopak jen když podávající bod prohrál.
+  const serverWonPoint = p.server === p.winner;
+  document.getElementById('editReasonAce').style.display = serverWonPoint ? 'block' : 'none';
+  document.getElementById('editReasonServiceWinner').style.display = serverWonPoint ? 'block' : 'none';
+  document.getElementById('editReasonDF').style.display = serverWonPoint ? 'none' : 'block';
+
+  updateEditReasonButtons();
+  updateEditShotButtons();
+  updateEditServeButtons();
+  updateEditShotVisibility();
+
+  closeReasonPanel();
+  closePausePanel();
+  closeRetirePanel();
+  pointButtons.style.display = 'none';
+  editPointPanel.style.display = 'block';
+}
+
+function closeEditPoint() {
+  editingIndex = null;
+  editPointPanel.style.display = 'none';
+  if (lastState && !lastState.matchWinner && !lastState.paused) pointButtons.style.display = 'grid';
+}
+
+document.querySelectorAll('#editReasonGrid .btn-reason').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    editSelectedReason = btn.getAttribute('data-edit-reason') || '';
+    if (editSelectedReason === 'double_fault') editSelectedServeNumber = 2;
+    if (!SHOT_TYPE_REASONS.includes(editSelectedReason)) editSelectedShotType = '';
+    updateEditReasonButtons();
+    updateEditShotButtons();
+    updateEditServeButtons();
+    updateEditShotVisibility();
+  });
+});
+
+document.querySelectorAll('#editShotGrid .btn-reason').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    editSelectedShotType = btn.getAttribute('data-edit-shot') || '';
+    updateEditShotButtons();
+  });
+});
+
+document.getElementById('editServeNum1').addEventListener('click', () => {
+  if (editSelectedReason === 'double_fault') return; // dvojchyba je vždy na 2. servis
+  editSelectedServeNumber = 1;
+  updateEditServeButtons();
+});
+document.getElementById('editServeNum2').addEventListener('click', () => {
+  editSelectedServeNumber = 2;
+  updateEditServeButtons();
+});
+
+document.getElementById('editPointSave').addEventListener('click', () => {
+  if (editingIndex === null) return;
+  socket.emit('action', {
+    type: 'editPoint',
+    index: editingIndex,
+    reason: editSelectedReason || undefined,
+    shotType: editSelectedShotType || undefined,
+    serveNumber: editSelectedServeNumber,
+  });
+  closeEditPoint();
+});
+document.getElementById('editPointCancel').addEventListener('click', closeEditPoint);
+
+// Změna vítěze bodu se provede hned po kliknutí (na rozdíl od Uložit opravu u
+// důvodu/úderu) - je to rychlá oprava "spletl jsem si, kdo bod vyhrál".
+function submitEditWinner(newWinner) {
+  if (editingIndex === null || !lastState) return;
+  const p = lastState.pointLog[editingIndex];
+  if (!p || p.winner === newWinner) return;
+  socket.emit('action', { type: 'editPointWinner', index: editingIndex, player: newWinner });
+  closeEditPoint();
+}
+document.getElementById('editWinnerA').addEventListener('click', () => submitEditWinner('A'));
+document.getElementById('editWinnerB').addEventListener('click', () => submitEditWinner('B'));
+
+socket.on('actionError', (err) => {
+  alert((err && err.message) || 'Tuhle akci appka nemohla provést.');
+});
 </script>
 </body>
 </html>

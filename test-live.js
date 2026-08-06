@@ -216,6 +216,120 @@ async function main() {
   }
   console.log("Test předčasného ukončení zápasu (skreč) OK.");
 
+  // test obnovení zápasu ze zálohy telefonu (pojistka proti ztrátě dat na serveru,
+  // např. po dlouhé pauze na free Renderu). Server má po resetu 0 bodů, "záloha"
+  // z telefonu má rozehraný zápas s 5 body -> po restoreState musí server data převzít.
+  scorer.emit("action", { type: "reset" });
+  await wait(150);
+  const fakeBackupState = {
+    playerA: "Ze zálohy A",
+    playerB: "Ze zálohy B",
+    setsToWin: 2,
+    deciderSuperTiebreak: false,
+    sets: [],
+    currentSet: { gamesA: 1, gamesB: 0 },
+    currentGame: { pA: 1, pB: 0 },
+    tiebreak: null,
+    isSuperTiebreakSet: false,
+    superTiebreak: null,
+    server: "A",
+    matchWinner: null,
+    lastPointWinner: "A",
+    lastPointReason: "winner",
+    lastPointShotType: "forehand",
+    startedAt: Date.now() - 60000,
+    endedAt: null,
+    pointLog: [
+      { t: Date.now() - 50000, winner: "A", reason: "winner", shotType: "forehand", server: "A", serveNumber: 1, setIndex: 0, superTiebreak: false, opportunity: null, converted: null },
+      { t: Date.now() - 40000, winner: "A", reason: null, server: "A", serveNumber: 1, setIndex: 0, superTiebreak: false, opportunity: null, converted: null },
+      { t: Date.now() - 30000, winner: "A", reason: null, server: "A", serveNumber: 1, setIndex: 0, superTiebreak: false, opportunity: null, converted: null },
+      { t: Date.now() - 20000, winner: "A", reason: null, server: "A", serveNumber: 1, setIndex: 0, superTiebreak: false, opportunity: null, converted: null },
+      { t: Date.now() - 10000, winner: "A", reason: null, server: "A", serveNumber: 1, setIndex: 0, superTiebreak: false, opportunity: null, converted: null },
+    ],
+    paused: false,
+    pauseReason: null,
+    pauses: [],
+    retired: false,
+    retiredPlayer: null,
+    retirementReason: null,
+  };
+  scorer.emit("action", { type: "restoreState", state: fakeBackupState });
+  await wait(200);
+  const afterRestore = viewerStates[viewerStates.length - 1];
+  if (afterRestore.state.playerA !== "Ze zálohy A" || afterRestore.state.pointLog.length !== 5) {
+    throw new Error("Obnovení ze zálohy telefonu selhalo: " + JSON.stringify({ playerA: afterRestore.state.playerA, points: afterRestore.state.pointLog.length }));
+  }
+  if (afterRestore.stats.stats.A.winnersByShot.forehand !== 1) {
+    throw new Error("Statistiky po obnovení ze zálohy se nepřepočítaly správně");
+  }
+  // poškozená/nevalidní záloha (chybí pointLog) se má tiše ignorovat, stav se nezmění
+  // a server o ní ani nemá nikomu vysílat novou zprávu
+  const lenBeforeInvalid = viewerStates.length;
+  scorer.emit("action", { type: "restoreState", state: { playerA: "X", playerB: "Y" } });
+  await wait(200);
+  if (viewerStates.length !== lenBeforeInvalid) {
+    throw new Error("Neplatná záloha (bez pointLog) neměla vyvolat žádné vysílání stavu, ale server něco poslal");
+  }
+  console.log("Test obnovení zápasu ze zálohy telefonu (restoreState) OK.");
+
+  // test zpětné úpravy kategorizace bodu (editPoint) - oprava "z omylu" bez vlivu na skóre
+  scorer.emit("action", { type: "reset" });
+  await wait(150);
+  scorer.emit("action", { type: "point", player: "A", reason: "unforced_error", serveNumber: 1 });
+  await wait(200);
+  const beforeEditPoint = viewerStates[viewerStates.length - 1];
+  const scoreBeforeEdit = JSON.stringify(beforeEditPoint.display);
+
+  scorer.emit("action", { type: "editPoint", index: 0, reason: "forced_error", shotType: "forehand", serveNumber: 1 });
+  await wait(200);
+  const afterEditPoint = viewerStates[viewerStates.length - 1];
+  if (JSON.stringify(afterEditPoint.display) !== scoreBeforeEdit) {
+    throw new Error("Oprava kategorizace bodu neměla změnit skóre");
+  }
+  if (afterEditPoint.state.pointLog[0].reason !== "forced_error" || afterEditPoint.state.pointLog[0].shotType !== "forehand") {
+    throw new Error("Oprava kategorizace bodu se nepropsala do pointLogu: " + JSON.stringify(afterEditPoint.state.pointLog[0]));
+  }
+  // bod vyhrál A (kvůli chybě B) -> chyba se počítá soupeři B, ne vítězi bodu A
+  if (afterEditPoint.stats.stats.B.forcedErrors !== 1 || afterEditPoint.stats.stats.B.unforcedErrors !== 0) {
+    throw new Error("Statistiky se po opravě bodu nepřepočítaly správně: " + JSON.stringify(afterEditPoint.stats.stats.B));
+  }
+  console.log("Test zpětné úpravy kategorizace bodu (editPoint) OK.");
+
+  // test zpětné změny VÍTĚZE bodu (scorer se spletl, kdo bod vyhrál)
+  scorer.emit("action", { type: "reset" });
+  await wait(150);
+  scorer.emit("action", { type: "point", player: "A" }); // omylem zapsáno pro A, mělo to být pro B
+  await wait(200);
+  scorer.emit("action", { type: "editPointWinner", index: 0, player: "B" });
+  await wait(200);
+  const afterWinnerEdit = viewerStates[viewerStates.length - 1];
+  if (afterWinnerEdit.state.pointLog[0].winner !== "B" || afterWinnerEdit.display.b !== 15) {
+    throw new Error("Změna vítěze bodu se nepropsala správně: " + JSON.stringify({ winner: afterWinnerEdit.state.pointLog[0].winner, display: afterWinnerEdit.display }));
+  }
+  console.log("Test zpětné změny vítěze bodu (editPointWinner) OK.");
+
+  // test odmítnutí neplatné opravy vítěze bodu (mimo rozsah pointLogu) + chybová
+  // zpráva zpět scorerovi. Samotnou pojistku "oprava by předčasně ukončila zápas
+  // a ztratila by novější body" už důkladně pokrývá test-logic.js (Test 22) na
+  // úrovni čisté logiky - tady jen ověřujeme, že server.js na zamítnutí správně
+  // reaguje (nic nevysílá, scorerovi pošle actionError).
+  scorer.emit("action", { type: "reset" });
+  await wait(150);
+  scorer.emit("action", { type: "point", player: "A" });
+  await wait(200);
+  let scorerError = null;
+  scorer.once("actionError", (e) => { scorerError = e; });
+  const lenBeforeRejected = viewerStates.length;
+  scorer.emit("action", { type: "editPointWinner", index: 99, player: "B" }); // mimo rozsah
+  await wait(300);
+  if (viewerStates.length !== lenBeforeRejected) {
+    throw new Error("Odmítnutá oprava vítěze bodu neměla vyvolat žádné vysílání stavu");
+  }
+  if (!scorerError || !scorerError.message) {
+    throw new Error("Scorer neměl dostat zpět chybovou zprávu o odmítnuté opravě");
+  }
+  console.log("Test odmítnutí neplatné opravy vítěze bodu + chybová zpráva OK.");
+
   // test izolace více zápasů: dva různé kódy zápasu se nesmí ovlivňovat
   const matchAlpha = io(URL, { transports: ["websocket"], query: { matchId: "ALPHA1" } });
   const matchBeta = io(URL, { transports: ["websocket"], query: { matchId: "BETA1" } });

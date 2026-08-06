@@ -11,6 +11,8 @@ const { Server } = require("socket.io");
 const {
   initialState,
   addPoint,
+  editPointMeta,
+  editPointWinner,
   gameScoreDisplay,
   computeStats,
   computeMomentum,
@@ -182,6 +184,60 @@ io.on("connection", (socket) => {
         if (action.player !== "A" && action.player !== "B") return;
         pushHistory(match);
         retireMatch(match.state, action.player, action.reason);
+        break;
+      }
+      case "editPoint": {
+        // Zpětná oprava kategorizace (důvod/typ úderu/servisní číslo) u jednoho
+        // z posledních odehraných bodů – nemění se tím skóre, jen statistiky.
+        if (typeof action.index !== "number") return;
+        pushHistory(match);
+        editPointMeta(match.state, action.index, {
+          reason: action.reason,
+          shotType: action.shotType,
+          serveNumber: action.serveNumber,
+        });
+        break;
+      }
+      case "editPointWinner": {
+        // Zpětná změna vítěze bodu (scorer se spletl) - vyžaduje přepočet celého
+        // zápasu přehráním, takže se to může výjimečně odmítnout (viz matchLogic.js),
+        // pokud by tím zápas skončil dřív, než kolik bodů bylo doopravdy odehráno.
+        if (typeof action.index !== "number" || (action.player !== "A" && action.player !== "B")) return;
+        const result = editPointWinner(match.state, action.index, action.player);
+        if (!result.applied) {
+          socket.emit("actionError", {
+            message:
+              "Tuhle změnu vítěze bodu appka nemohla provést – zřejmě by tím zápas předčasně skončil a ztratily by se novější odehrané body. Spolehlivě to funguje jen u nedávných bodů.",
+          });
+          return;
+        }
+        pushHistory(match);
+        match.state = result.state;
+        break;
+      }
+      case "restoreState": {
+        // Obnovení zápasu ze zálohy uložené v prohlížeči scorera (localStorage) –
+        // pojistka pro případ, že server (např. po dlouhé pauze na free Renderu)
+        // ztratil rozehraný zápas z disku. Základní validace tvaru + zpětně
+        // kompatibilní merge stejně jako u načítání starších dat z disku.
+        const incoming = action.state;
+        if (
+          !incoming ||
+          typeof incoming !== "object" ||
+          typeof incoming.playerA !== "string" ||
+          typeof incoming.playerB !== "string" ||
+          !Array.isArray(incoming.pointLog)
+        ) {
+          return;
+        }
+        pushHistory(match);
+        const base = initialState(
+          incoming.playerA,
+          incoming.playerB,
+          incoming.setsToWin,
+          incoming.deciderSuperTiebreak
+        );
+        match.state = { ...base, ...incoming };
         break;
       }
       default:

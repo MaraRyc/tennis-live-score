@@ -2,6 +2,8 @@ const assert = require("assert");
 const {
   initialState,
   addPoint,
+  editPointMeta,
+  editPointWinner,
   gameScoreDisplay,
   computeStats,
   computeMomentum,
@@ -328,6 +330,110 @@ function play(state, seq) {
   assert.deepStrictEqual(momentum.map((m) => m.diff), [1, 2, 1]);
   assert.deepStrictEqual(momentum.map((m) => m.index), [1, 2, 3]);
   console.log("Test 19 OK: graf vývoje zápasu (kumulativní náskok v bodech) se počítá správně");
+}
+
+// Test 20: zpětná oprava kategorizace bodu (editPointMeta) nemění skóre, jen statistiky
+{
+  const s = initialState("Petra", "Jana"); // server 'A'
+  // Bod vyhrává A (kvůli chybě soupeře B) - omylem zapsáno jako nevynucená chyba,
+  // mělo být vynucená chyba z forhandu.
+  addPoint(s, "A", "unforced_error");
+  addPoint(s, "A", "winner", 1, "backhand");
+  const scoreBefore = gameScoreDisplay(s);
+
+  editPointMeta(s, 0, { reason: "forced_error", shotType: "forehand", serveNumber: 1 });
+  assert.deepStrictEqual(gameScoreDisplay(s), scoreBefore, "oprava kategorizace nemá měnit průběžné skóre");
+  assert.strictEqual(s.pointLog[0].reason, "forced_error");
+  assert.strictEqual(s.pointLog[0].shotType, "forehand");
+  assert.strictEqual(s.pointLog[0].winner, "A", "oprava metadat nemá měnit, kdo bod vyhrál");
+
+  const { stats } = computeStats(s);
+  // chyba se počítá tomu, kdo chyboval - tedy soupeři (B), ne vítězi bodu (A)
+  assert.strictEqual(stats.B.unforcedErrors, 0, "po opravě už se první bod nemá počítat jako nevynucená chyba");
+  assert.strictEqual(stats.B.forcedErrors, 1, "po opravě se má počítat jako vynucená chyba");
+  assert.strictEqual(stats.B.forcedErrorsByShot.forehand, 1);
+
+  // oprava posledního bodu se má promítnout i do lastPointReason/lastPointShotType
+  editPointMeta(s, 1, { reason: "unforced_error", shotType: "backhand_slice" });
+  assert.strictEqual(s.lastPointReason, "unforced_error");
+  assert.strictEqual(s.lastPointShotType, "backhand_slice");
+
+  // neplatný index se má tiše ignorovat
+  const beforeInvalidEdit = JSON.stringify(s);
+  editPointMeta(s, 99, { reason: "ace" });
+  assert.strictEqual(JSON.stringify(s), beforeInvalidEdit, "úprava bodu s neplatným indexem nemá nic změnit");
+
+  console.log("Test 20 OK: zpětná oprava kategorizace bodu (editPointMeta) nemění skóre, jen statistiky");
+}
+
+// Test 21: zpětná změna vítěze bodu přepočítá skóre a vynuluje důvod u opraveného bodu
+{
+  const s = initialState("Petra", "Jana");
+  addPoint(s, "A", "winner", 1, "forehand");
+  addPoint(s, "A");
+  addPoint(s, "B");
+
+  const result = editPointWinner(s, 0, "B");
+  assert.strictEqual(result.applied, true, "běžná oprava vítěze bodu (bez předčasného konce zápasu) se má provést");
+  const edited = result.state;
+
+  // ověření nezávislým přehráním opravené sekvence
+  const expected = initialState("Petra", "Jana");
+  addPoint(expected, "B");
+  addPoint(expected, "A");
+  addPoint(expected, "B");
+  assert.deepStrictEqual(gameScoreDisplay(edited), gameScoreDisplay(expected), "skóre po opravě vítěze bodu neodpovídá přehrání opravené sekvence");
+
+  assert.strictEqual(edited.pointLog[0].winner, "B");
+  assert.strictEqual(edited.pointLog[0].reason, null, "po přehození vítěze se má důvod/úder vynulovat");
+  assert.strictEqual(edited.pointLog[0].shotType, null);
+  assert.strictEqual(edited.pointLog[1].winner, "A", "ostatní body zůstávají beze změny");
+  assert.strictEqual(edited.pointLog.length, 3, "počet bodů se nemá měnit");
+  console.log("Test 21 OK: zpětná změna vítěze bodu přepočítá skóre a vynuluje důvod u opraveného bodu");
+}
+
+// Test 22: pojistka proti ztrátě dat - odmítnutí opravy, která by zápas ukončila dřív
+{
+  const s = initialState("Petra", "Jana", 1); // zápas na 1 vítězný set, ať je scénář kratší
+  for (let g = 0; g < 5; g++) {
+    addPoint(s, "A"); addPoint(s, "A"); addPoint(s, "A"); addPoint(s, "A"); // hry 1-5: A vyhrává každou 4:0
+  }
+  // poslední (6.) hra: B získá první bod, pak ji A dorovná a vyhraje zápas 4:1
+  addPoint(s, "B");
+  addPoint(s, "A");
+  addPoint(s, "A");
+  addPoint(s, "A");
+  addPoint(s, "A");
+  assert.strictEqual(s.matchWinner, "A");
+  assert.strictEqual(s.pointLog.length, 25);
+
+  // Přehození úplně prvního bodu poslední hry (byl "B") na "A" by hru (a tedy
+  // i zápas) ukončilo o bod dřív - poslední, doopravdy odehraný bod by "zmizel".
+  const result = editPointWinner(s, 20, "A");
+  assert.strictEqual(result.applied, false, "oprava, která by při přehrání ztratila novější body, se má odmítnout");
+  assert.strictEqual(result.state, s, "při zamítnutí se má vrátit původní nezměněný stav");
+  assert.strictEqual(s.pointLog.length, 25, "původní data se při zamítnuté opravě nemají vůbec změnit");
+  assert.strictEqual(s.pointLog[20].winner, "B", "zamítnutá oprava nesmí nic v původním stavu změnit");
+  console.log("Test 22 OK: oprava vítěze bodu, která by ztratila novější body, se bezpečně odmítne");
+}
+
+// Test 23: oprava vítěze bodu u skrečovaného zápasu zachová výsledek skreče
+{
+  const s = initialState("Petra", "Jana");
+  addPoint(s, "A", "winner", 1, "forehand");
+  addPoint(s, "A");
+  retireMatch(s, "B", "zranění");
+  assert.strictEqual(s.matchWinner, "A");
+  assert.strictEqual(s.retired, true);
+
+  const result = editPointWinner(s, 0, "B");
+  assert.strictEqual(result.applied, true);
+  const edited = result.state;
+  assert.strictEqual(edited.matchWinner, "A", "skreč určuje vítěze zápasu nezávisle na opravě jednotlivého bodu");
+  assert.strictEqual(edited.retired, true);
+  assert.strictEqual(edited.retiredPlayer, "B");
+  assert.strictEqual(edited.pointLog[0].winner, "B");
+  console.log("Test 23 OK: oprava vítěze bodu u skrečovaného zápasu zachová výsledek skreče");
 }
 
 console.log("\nVšechny testy prošly.");
